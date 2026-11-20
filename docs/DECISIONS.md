@@ -89,15 +89,32 @@ invalid, verify unreachable — verify moves no money — or settle answered
 `success: false` with a reason): the claim is released, so the buyer may retry the same
 authorisation. Unknown (settle deadline passed, transport error or malformed answer
 during settle, `settlement_pending`, the bookkeeping task panicked): the claim is Held,
-never released and never evicted, the request gets 504/502, and a retry of the same proof
-is not served. `NonceStore::held()` lists them for M4's reconciliation. The facilitator
-calls run in a spawned task so a client hanging up cannot cancel the bookkeeping.
+never released, the request gets 504/502, and a retry of the same proof is not served.
+`NonceStore::held()` lists them for M4's reconciliation.
+
+Amended after review: "definitely not paid" at settle is a closed list of pre-broadcast
+reasons (`RELEASE_ON_SETTLE` in the layer: insufficient funds, a bad signature or
+authorisation window, an unsupported scheme or network, …) and only with an empty
+`transaction`; any other `success: false` — an unexpected error, a nonce already used,
+anything carrying a transaction — holds the claim. Verify and settle answers are
+cross-checked against the claim (payer, network, amount, a 32-byte transaction hash); a
+mismatching success is held, not served. Verify, settle, the handler and the delivery run
+in ONE spawned task that owns the in-flight permit and the client's slot, with a drop
+guard that records the claim (Held, or paid-but-not-delivered) if the task ends early;
+a client hanging up neither cancels the bookkeeping nor frees the bound. A settled
+payment whose response did not reach the client is recorded `paid_but_not_delivered`
+and a retry of the same proof is served once more; a retry of a delivered payment gets
+409 `payment_already_settled` with its `PAYMENT-RESPONSE`, never a 402 (a buyer must not
+read "money moved" as "not paid").
 
 ## D-010 — The M1 nonce store is in memory, bounded, and sheds when full
 
-`MemoryNonceStore` holds at most `capacity` claims and evicts only Settled claims whose
-authorisation has expired (the chain refuses them anyway). In-flight and Held are never
-evicted; when full, new payments get 503 with `Retry-After`. To bound retention the layer
+`MemoryNonceStore` holds at most `capacity` claims, indexed by expiry (a `BTreeSet`, so
+a sweep touches only what expired, never the whole map). Expired delivered claims are
+dropped (the chain refuses the authorisation anyway); expired Held, in-flight and
+paid-but-not-delivered claims move to a bounded reconciliation list (`held()`), so they
+leave the hot store without being forgotten. When the store or that list is full, new
+payments get 503 with `Retry-After`. To bound retention the layer
 refuses a `validBefore` beyond `now + maxTimeoutSeconds + 30 s`. It does not survive a
 restart: M2's PostgreSQL claim (failure cases 1–7) replaces it behind the same
 `NonceStore` trait; until then a restart forgets Held claims, which the chain's own nonce
@@ -107,26 +124,39 @@ check still protects against double payment (not against double serving).
 
 `HttpFacilitator`: connect and total timeouts, no redirects, an http(s) base with a host,
 answers read in chunks up to 64 KiB. The layer adds its own verify (5 s) and settle (20 s)
-deadlines and a `max_in_flight` semaphore (256) past the offline checks. The wallet: a
+deadlines, a handler deadline (30 s), a `max_in_flight` semaphore (256) whose permit
+lives in the payment task, and a per-client limit (`max_in_flight_per_client`, 16; IPv4
+address or IPv6 /64, `X-Forwarded-For` only from `trusted_proxies`) taken before any
+facilitator work. The offline checks are signature-only, so a funded-or-not random
+signer passes them; these two bounds are what cap facilitator calls. The wallet: a
 request timeout, no redirects (so the allowlist is checked on the URL that returned the
 402, `docs/KNOWLEDGE.md` §5.6), a body cap, and a bounded number of resends.
 
 ## D-012 — The buyer: exact host allowlist, two caps, one proof per 402
 
-`xpay_wallet::Wallet` pays only for an exact `host` or `host:port` on its allowlist (no
-suffix matching), only an `exact` offer on an allowed network with the table's USDC and
-domain, only within `max_per_payment` and what is left of `total_cap`. The amount is
-reserved under a lock before signing; released only on a definite refusal (402); kept on
-an unknown outcome, so the cap holds when answers are lost. A resend after a lost answer
+`xpay_wallet::Wallet` pays only an `AllowedHost { host, pay_to }` origin: `https`, or
+`http` on loopback; `host:port` exact, a bare host meaning the default port (never any
+port); and only to a `payTo` on that origin's list, checked before signing (failure case
+1). Only an `exact`, non-zero offer on an allowed network with the table's USDC and
+domain, within `max_per_payment` and what is left of `total_cap`. The amount is reserved
+under a lock before signing and released if signing fails. Once the proof has been sent,
+no answer from the seller releases it — whoever holds the proof can settle it, so a 402
+proves nothing. The proof is tracked as `Unresolved` (bounded by
+`Limits::max_unresolved`) until `Wallet::reconcile` sees, through an
+`AuthorizationState` source, that `validBefore` (+120 s for clock drift) passed and
+`authorizationState(from, nonce)` is still false; used means spent.
+`cancelAuthorization` also sets that state, so a cancelled proof reads as spent until M4
+reconciles against events. Seller reason text reaches the caller only as a plain code. A resend after a lost answer
 or 5xx carries the same proof, so one 402 is paid at most once. `validAfter` is
 `now − 600 s` (USDC refuses `validAfter ≥ block.timestamp`; `docs/KNOWLEDGE.md`),
 `validBefore` is `now + maxTimeoutSeconds`, and `maxTimeoutSeconds` is capped by policy.
 The cap is per process in M1; M2 moves it into the ledger's transaction.
 
-## D-013 — Signatures: 65-byte EOA, low-s, v in {27, 28, 0, 1}
+## D-013 — Signatures: 65-byte EOA, low-s, v in {27, 28}
 
-Recovery accepts exactly 65 bytes, low-s only, and v of 27/28 (or 0/1, the same parity);
-anything else — an EIP-155-style v such as 59, found by the fuzz target — is
+Recovery accepts exactly 65 bytes, low-s only, and v of 27/28 (amended after review: 0/1
+are refused too — the token's `ecrecover` takes only 27/28, so a 0/1 proof would pass the
+offline check and fail on chain); anything else — an EIP-155-style v such as 59, found by the fuzz target — is
 `invalid_exact_evm_payload_signature`, because USDC's `ecrecover` would refuse it and a
 second spelling of one signature is malleability. Smart-wallet (EIP-1271/6492) signatures
 are not accepted in M1.
@@ -163,3 +193,23 @@ the mock facilitator handle only public signatures; the buyer's key is the expos
 the leak needs an observer on the buyer's machine. It is removed when alloy moves to
 `k256` 0.14. It also ignores RUSTSEC-2024-0436 (`paste`, unmaintained, no
 vulnerability), a build-time proc-macro under alloy.
+
+## D-017 — One nonce store per payTo, one instance, until M2
+
+At-most-once service holds only inside one nonce store: two stores for one recipient (two
+instances, or two route layers) could each verify and settle the same authorisation
+pair, and a facilitator may answer success to an identical re-submission. Until M2's
+shared PostgreSQL claim, `PaymentLayer::new` enforces it: a process-wide registry refuses
+a second store for an offer's `payTo` (`ConfigError::PayToTaken`; the same store on
+several routes is fine, and the entry is freed when the last layer is dropped), and with
+`PaymentConfig::lock_dir` set it takes an exclusive file lock per `payTo`, so a second
+process on the host refuses to start (`ConfigError::PayToLocked`). Instances on other hosts
+cannot be seen from M1: one instance per recipient stays an operator rule until M2. Offers are
+validated against the USDC table at construction (D-007).
+
+## D-018 — Load scenario covers hang-ups, a signer flood, latency and a full store
+
+`perf/scenarios/x402-paid.md` adds clients that hang up mid-payment, fresh random
+signers flooding from one address, 1 ms of facilitator settle latency, and a phase
+against a 64-claim store, with thresholds written before the first run.
+
