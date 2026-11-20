@@ -9,7 +9,7 @@ use serde::de::DeserializeOwned;
 
 /// The longest payment header accepted, encoded. A v2 exact-EVM
 /// payload is about 1.5 KiB encoded; 8 KiB is the common per-header limit of proxies.
-pub const MAX_HEADER_BYTES: usize = 8 * 1024; // LIMIT(x402-header)
+pub const MAX_HEADER_BYTES: usize = 8 * 1024; // LIMIT(payment-header)
 
 const DECODER: GeneralPurpose = GeneralPurpose::new(
     &alphabet::STANDARD,
