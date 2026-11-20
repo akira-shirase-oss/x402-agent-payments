@@ -58,6 +58,13 @@ pub(crate) struct Paywall {
     pub served: Arc<AtomicUsize>,
 }
 
+/// Without the per-host payee lock: test binaries run as parallel processes with one
+/// `payTo`. The lock has its own tests.
+pub(crate) fn unlocked(mut config: PaymentConfig) -> PaymentConfig {
+    config.lock_dir = None;
+    config
+}
+
 pub(crate) struct Setup {
     pub mode: SettleMode,
     pub faults: Faults,
@@ -66,6 +73,7 @@ pub(crate) struct Setup {
     pub handler_status: StatusCode,
     /// Replaces the mock facilitator in the layer (the mock still exists, unused).
     pub facilitator: Option<Arc<dyn xpay_seller::Facilitator>>,
+    pub trusted_proxies: Vec<xpay_seller::ProxyNet>,
 }
 
 impl Default for Setup {
@@ -77,6 +85,7 @@ impl Default for Setup {
             offers: vec![offer(Caip2::BASE_SEPOLIA)],
             handler_status: StatusCode::OK,
             facilitator: None,
+            trusted_proxies: Vec::new(),
         }
     }
 }
@@ -90,15 +99,16 @@ pub(crate) fn paywall(setup: Setup) -> Paywall {
         Arc::new(clock.clone()),
     ));
     let served = Arc::new(AtomicUsize::new(0));
-    let mut config = PaymentConfig::new(
+    let mut config = unlocked(PaymentConfig::new(
         ResourceInfo {
             url: "http://127.0.0.1:63361/paid".into(),
             ..ResourceInfo::default()
         },
         setup.offers,
-    );
+    ));
     config.mode = setup.mode;
     config.settle_timeout = Duration::from_secs(2);
+    config.trusted_proxies = setup.trusted_proxies;
     let layer = PaymentLayer::new(
         config,
         setup
@@ -145,15 +155,33 @@ pub(crate) struct Answer {
 }
 
 pub(crate) async fn get_paid(app: &Router, payment: Option<&str>) -> Answer {
+    get_paid_via(
+        app,
+        payment,
+        std::net::SocketAddr::from(([203, 0, 113, 1], 1000)),
+        None,
+    )
+    .await
+}
+
+/// From `peer`, with an optional `X-Forwarded-For` value.
+pub(crate) async fn get_paid_via(
+    app: &Router,
+    payment: Option<&str>,
+    peer: std::net::SocketAddr,
+    forwarded: Option<axum::http::HeaderValue>,
+) -> Answer {
     let mut req = Request::get("/paid");
     if let Some(p) = payment {
         req = req.header("payment-signature", p);
     }
-    let resp = app
-        .clone()
-        .oneshot(req.body(Body::empty()).unwrap())
-        .await
-        .unwrap();
+    if let Some(f) = forwarded {
+        req = req.header("x-forwarded-for", f);
+    }
+    let mut req = req.body(Body::empty()).unwrap();
+    req.extensions_mut()
+        .insert(axum::extract::ConnectInfo(peer));
+    let resp = app.clone().oneshot(req).await.unwrap();
     let status = resp.status();
     let headers = resp.headers().clone();
     let bytes = resp.into_body().collect().await.unwrap().to_bytes();

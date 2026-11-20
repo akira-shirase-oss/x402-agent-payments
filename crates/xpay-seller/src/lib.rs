@@ -12,6 +12,12 @@ pub mod layer;
 pub mod store;
 
 pub use http_facilitator::HttpFacilitator;
-pub use layer::{ConfigError, Paid, PaymentConfig, PaymentLayer, PaymentService, SettleMode};
-pub use store::{Claim, ClaimState, Delivery, MemoryNonceStore, NonceKey, NonceStore};
+pub use layer::{
+    ConfigError, Paid, PaymentConfig, PaymentLayer, PaymentService, ProxyNet, ProxyNetError,
+    SettleMode, default_lock_dir,
+};
+pub use store::{
+    Claim, ClaimState, Delivery, DisputeLog, FileDisputeLog, Listed, MemoryNonceStore, NonceKey,
+    NonceStore, Redelivery, Route, drain_to_log,
+};
 pub use xpay_x402::facilitator::{Facilitator, FacilitatorError};

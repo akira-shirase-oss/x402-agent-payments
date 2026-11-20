@@ -26,6 +26,8 @@ pub const PRICE: u64 = 10_000;
 
 pub async fn serve(listener: TcpListener, app: Router) {
     // A dev binary: a failed accept loop ends the process with the error.
+    // The peer address is required by the payment layer's per-client bound.
+    let app = app.into_make_service_with_connect_info::<SocketAddr>();
     if let Err(e) = axum::serve(listener, app).await {
         eprintln!("server stopped: {e}");
     }

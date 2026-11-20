@@ -98,13 +98,13 @@ fn build(
 ) -> Built {
     let clock = ManualClock::at(NOW);
     let store = Arc::new(MemoryNonceStore::new(1024, Arc::new(clock.clone())));
-    let mut config = PaymentConfig::new(
+    let mut config = unlocked(PaymentConfig::new(
         ResourceInfo {
             url: "http://127.0.0.1:63361/paid".into(),
             ..ResourceInfo::default()
         },
         vec![offer(Caip2::BASE_SEPOLIA)],
-    );
+    ));
     config.mode = mode;
     config.max_in_flight = max_in_flight;
     let facilitator =
@@ -273,7 +273,10 @@ async fn one_client_cannot_take_every_payment_slot() {
     });
     let clock = ManualClock::at(NOW);
     let store = Arc::new(MemoryNonceStore::new(64, Arc::new(clock.clone())));
-    let mut config = PaymentConfig::new(ResourceInfo::default(), vec![offer(Caip2::BASE_SEPOLIA)]);
+    let mut config = unlocked(PaymentConfig::new(
+        ResourceInfo::default(),
+        vec![offer(Caip2::BASE_SEPOLIA)],
+    ));
     config.max_in_flight_per_client = 2;
     let layer = PaymentLayer::new(config, f, store, Arc::new(clock)).unwrap();
     let app = Router::new()
@@ -317,7 +320,10 @@ async fn a_payee_gets_one_store_per_process() {
     let clock = ManualClock::at(NOW);
     let mk = |store: Arc<MemoryNonceStore>| {
         PaymentLayer::new(
-            PaymentConfig::new(ResourceInfo::default(), vec![offer(Caip2::BASE_SEPOLIA)]),
+            unlocked(PaymentConfig::new(
+                ResourceInfo::default(),
+                vec![offer(Caip2::BASE_SEPOLIA)],
+            )),
             Arc::new(MockFacilitator::new(Arc::new(clock.clone()))),
             store,
             Arc::new(clock.clone()),
@@ -366,11 +372,141 @@ async fn offers_are_checked_against_the_usdc_table() {
     zero.amount = "0".into();
     for (o, want) in [(bad, 0), (zero, 0)] {
         let r = PaymentLayer::new(
-            PaymentConfig::new(ResourceInfo::default(), vec![o]),
+            unlocked(PaymentConfig::new(ResourceInfo::default(), vec![o])),
             Arc::new(MockFacilitator::new(Arc::new(clock.clone()))),
             Arc::new(MemoryNonceStore::new(8, Arc::new(clock.clone()))),
             Arc::new(clock.clone()),
         );
         assert_eq!(r.unwrap_err(), xpay_seller::ConfigError::Offer(want));
     }
+}
+
+#[tokio::test]
+async fn clients_behind_a_proxy_chain_are_told_apart() {
+    let active = Arc::new(AtomicUsize::new(0));
+    let f = Arc::new(Scripted {
+        hang_verify: true,
+        active_verify: active.clone(),
+        answer: None,
+    });
+    let clock = ManualClock::at(NOW);
+    let store = Arc::new(MemoryNonceStore::new(64, Arc::new(clock.clone())));
+    let mut config = unlocked(PaymentConfig::new(
+        ResourceInfo::default(),
+        vec![offer(Caip2::BASE_SEPOLIA)],
+    ));
+    config.max_in_flight_per_client = 1;
+    // Caddy on loopback, then a CDN egress range in front of it.
+    config.trusted_proxies = vec![
+        "127.0.0.1".parse().unwrap(),
+        "198.51.100.0/24".parse().unwrap(),
+    ];
+    let layer = PaymentLayer::new(config, f, store, Arc::new(clock)).unwrap();
+    let app = Router::new()
+        .route("/paid", get(|| async { "ok" }))
+        .layer(layer);
+    let via_cdn = |client: &str, n: u8| {
+        let app = app.clone();
+        let h = header(&pay(&offer(Caip2::BASE_SEPOLIA), n));
+        let xff = format!("{client}, 198.51.100.20");
+        async move {
+            let mut r = axum::http::Request::get("/paid")
+                .header("payment-signature", h)
+                .header("x-forwarded-for", xff)
+                .body(axum::body::Body::empty())
+                .unwrap();
+            r.extensions_mut().insert(axum::extract::ConnectInfo(
+                "127.0.0.1:1000".parse::<std::net::SocketAddr>().unwrap(),
+            ));
+            tower::ServiceExt::oneshot(app, r).await.unwrap().status()
+        }
+    };
+    let first = tokio::spawn(via_cdn("203.0.113.5", 90));
+    assert!(until(|| active.load(Ordering::SeqCst) == 1).await);
+    assert_eq!(
+        via_cdn("203.0.113.5", 91).await,
+        axum::http::StatusCode::SERVICE_UNAVAILABLE,
+        "the same client is still limited"
+    );
+    let other = tokio::spawn(via_cdn("203.0.113.6", 92));
+    assert!(
+        until(|| active.load(Ordering::SeqCst) == 2).await,
+        "another client behind the same CDN egress gets its own slot"
+    );
+    first.abort();
+    other.abort();
+}
+
+#[tokio::test]
+async fn the_payee_lock_is_on_by_default_and_one_store_may_serve_many_routes() {
+    let clock = ManualClock::at(NOW);
+    let config = PaymentConfig::new(ResourceInfo::default(), vec![offer(Caip2::BASE_SEPOLIA)]);
+    assert!(
+        config.lock_dir.is_some(),
+        "the per-host lock is on by default"
+    );
+    let store = Arc::new(MemoryNonceStore::new(8, Arc::new(clock.clone())));
+    let mk = || {
+        PaymentLayer::new(
+            config.clone(),
+            Arc::new(MockFacilitator::new(Arc::new(clock.clone()))),
+            store.clone(),
+            Arc::new(clock.clone()),
+        )
+    };
+    let first = mk().unwrap();
+    let second = mk().expect("the same store on a second route takes the lock once");
+    drop((first, second));
+}
+
+#[tokio::test]
+async fn one_network_cannot_take_every_payment_slot() {
+    let active = Arc::new(AtomicUsize::new(0));
+    let f = Arc::new(Scripted {
+        hang_verify: true,
+        active_verify: active.clone(),
+        answer: None,
+    });
+    let clock = ManualClock::at(NOW);
+    let store = Arc::new(MemoryNonceStore::new(64, Arc::new(clock.clone())));
+    let mut config = unlocked(PaymentConfig::new(
+        ResourceInfo::default(),
+        vec![offer(Caip2::BASE_SEPOLIA)],
+    ));
+    config.max_in_flight_per_client = 1;
+    config.max_in_flight_per_network = 2;
+    let layer = PaymentLayer::new(config, f, store, Arc::new(clock)).unwrap();
+    let app = Router::new()
+        .route("/paid", get(|| async { "ok" }))
+        .layer(layer);
+    // One /48, a fresh /64 per request: rotating addresses is not a new client.
+    let from = |peer: &str, n: u8| {
+        let app = app.clone();
+        let h = header(&pay(&offer(Caip2::BASE_SEPOLIA), n));
+        let peer: std::net::SocketAddr = format!("[{peer}]:1000").parse().unwrap();
+        async move {
+            let mut r = axum::http::Request::get("/paid")
+                .header("payment-signature", h)
+                .body(axum::body::Body::empty())
+                .unwrap();
+            r.extensions_mut().insert(axum::extract::ConnectInfo(peer));
+            tower::ServiceExt::oneshot(app, r).await.unwrap().status()
+        }
+    };
+    let a = tokio::spawn(from("2001:db8:1:1::1", 100));
+    let b = tokio::spawn(from("2001:db8:1:2::1", 101));
+    assert!(until(|| active.load(Ordering::SeqCst) == 2).await);
+    assert_eq!(
+        from("2001:db8:1:3::1", 102).await,
+        axum::http::StatusCode::SERVICE_UNAVAILABLE,
+        "a third /64 in the same /48 waits for the network's slots"
+    );
+    let other = tokio::spawn(from("2001:db8:2:1::1", 103));
+    assert!(
+        until(|| active.load(Ordering::SeqCst) == 3).await,
+        "another network is not affected"
+    );
+    a.abort();
+    b.abort();
+    other.abort();
 }

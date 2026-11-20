@@ -3,14 +3,14 @@
 
 use std::collections::HashMap;
 use std::convert::Infallible;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
 use std::str::FromStr as _;
 use std::sync::{Arc, LazyLock, Mutex, PoisonError};
 use std::task::{Context, Poll};
 use std::time::Duration;
 
-use alloy_primitives::{Address, U256};
+use alloy_primitives::{Address, U256, keccak256};
 use axum::body::Body;
 use axum::extract::ConnectInfo;
 use axum::http::{HeaderMap, HeaderValue, Request, StatusCode, header};
@@ -26,7 +26,7 @@ use xpay_x402::{
     SCHEME_EXACT, SettleResponse, X402_VERSION, decode_header, encode_header, reason,
 };
 
-use crate::store::{Claim, ClaimState, Delivery, NonceKey, NonceStore};
+use crate::store::{Claim, ClaimState, Delivery, NonceKey, NonceStore, Redelivery, Route};
 
 /// How far past `now + maxTimeoutSeconds` a `validBefore` may reach (buyer clock skew).
 /// Bounding it bounds how long a claim must be remembered.
@@ -59,10 +59,15 @@ pub struct PaymentConfig {
     pub max_in_flight: usize,
     /// Bound: of those, how many one client (IPv4 address or IPv6 /64) may hold.
     pub max_in_flight_per_client: usize,
-    /// Peers whose right-most `X-Forwarded-For` hop names the client.
-    pub trusted_proxies: Vec<IpAddr>,
-    /// If set, the layer takes an exclusive lock file here per offer, so a second seller
-    /// process for the same `payTo` on this host refuses to start (D-017).
+    /// Bound: how many one network (IPv4 /24 or IPv6 /48) may hold, so rotating addresses
+    /// inside one allocation does not multiply a client's share.
+    pub max_in_flight_per_network: usize,
+    /// Proxies (addresses or CIDR ranges) whose `X-Forwarded-For` hops are believed: the
+    /// client is the right-most hop that is not itself a trusted proxy.
+    pub trusted_proxies: Vec<ProxyNet>,
+    /// The layer takes an exclusive lock file here per payee, so a second seller process
+    /// for the same `payTo` on this host refuses to start (D-017). On by default
+    /// ([`default_lock_dir`]); `None` turns it off.
     pub lock_dir: Option<PathBuf>,
 }
 
@@ -77,9 +82,87 @@ impl PaymentConfig {
             handler_timeout: Duration::from_secs(30),
             max_in_flight: 256,
             max_in_flight_per_client: 16,
+            max_in_flight_per_network: 64,
             trusted_proxies: Vec::new(),
-            lock_dir: None,
+            lock_dir: Some(default_lock_dir()),
         }
+    }
+}
+
+/// Where payee locks live unless configured: the service's runtime or state directory
+/// (systemd), else the user's runtime directory, else a private directory under the
+/// temporary directory.
+pub fn default_lock_dir() -> PathBuf {
+    ["RUNTIME_DIRECTORY", "STATE_DIRECTORY", "XDG_RUNTIME_DIR"]
+        .iter()
+        .filter_map(std::env::var_os)
+        .map(PathBuf::from)
+        .find(|p| p.is_absolute())
+        .unwrap_or_else(|| std::env::temp_dir().join("x402-seller-locks"))
+}
+
+/// A trusted proxy: one address or a CIDR range (`"10.0.0.0/8"`, `"2001:db8::/32"`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProxyNet {
+    addr: IpAddr,
+    prefix: u8,
+}
+
+impl ProxyNet {
+    pub fn contains(&self, ip: IpAddr) -> bool {
+        let ip = canonical(ip);
+        match (self.addr, ip) {
+            (IpAddr::V4(n), IpAddr::V4(a)) => {
+                let mask = u32::MAX
+                    .checked_shl(32 - u32::from(self.prefix))
+                    .unwrap_or(0);
+                u32::from(n) & mask == u32::from(a) & mask
+            }
+            (IpAddr::V6(n), IpAddr::V6(a)) => {
+                let mask = u128::MAX
+                    .checked_shl(128 - u32::from(self.prefix))
+                    .unwrap_or(0);
+                u128::from(n) & mask == u128::from(a) & mask
+            }
+            _ => false,
+        }
+    }
+}
+
+impl From<IpAddr> for ProxyNet {
+    fn from(addr: IpAddr) -> Self {
+        let addr = canonical(addr);
+        let prefix = if addr.is_ipv4() { 32 } else { 128 };
+        Self { addr, prefix }
+    }
+}
+
+/// Why a [`ProxyNet`] does not parse.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("not an IP address or CIDR range")]
+pub struct ProxyNetError;
+
+impl std::str::FromStr for ProxyNet {
+    type Err = ProxyNetError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let (ip, prefix) = s.split_once('/').map_or((s, None), |(a, p)| (a, Some(p)));
+        let net = Self::from(ip.trim().parse::<IpAddr>().map_err(|_| ProxyNetError)?);
+        let Some(p) = prefix else {
+            return Ok(net);
+        };
+        let p: u8 = p.trim().parse().map_err(|_| ProxyNetError)?;
+        let max = if net.addr.is_ipv4() { 32 } else { 128 };
+        if p > max || (p == 0) {
+            return Err(ProxyNetError);
+        }
+        Ok(Self { prefix: p, ..net })
+    }
+}
+
+fn canonical(ip: IpAddr) -> IpAddr {
+    match ip {
+        IpAddr::V6(v6) => v6.to_ipv4_mapped().map_or(ip, IpAddr::V4),
+        IpAddr::V4(_) => ip,
     }
 }
 
@@ -112,12 +195,20 @@ pub struct Paid {
 /// One payee in one process: (network, asset, payTo).
 type Payee = (String, Address, Address);
 
+/// One payee's registration: the store its claims live in, how many layers use it, and
+/// the host lock taken once for all of them.
+struct Registered {
+    store: usize,
+    layers: usize,
+    _lock: Option<std::fs::File>,
+}
+
 /// The process's payees and the store each one's claims live in (D-017): two stores for
 /// one payee would each accept the same authorisation once.
-static PAYEES: LazyLock<Mutex<HashMap<Payee, (usize, usize)>>> =
+static PAYEES: LazyLock<Mutex<HashMap<Payee, Registered>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
-fn payees() -> std::sync::MutexGuard<'static, HashMap<Payee, (usize, usize)>> {
+fn payees() -> std::sync::MutexGuard<'static, HashMap<Payee, Registered>> {
     PAYEES.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
@@ -129,17 +220,15 @@ struct Shared {
     gate: Arc<Semaphore>,
     clients: Arc<Clients>,
     payees: Vec<Payee>,
-    /// Held for the layer's life.
-    _locks: Vec<std::fs::File>,
 }
 
 impl Drop for Shared {
     fn drop(&mut self) {
         let mut all = payees();
         for p in &self.payees {
-            if let Some((_, n)) = all.get_mut(p) {
-                *n -= 1;
-                if *n == 0 {
+            if let Some(r) = all.get_mut(p) {
+                r.layers -= 1;
+                if r.layers == 0 {
                     all.remove(p);
                 }
             }
@@ -179,13 +268,32 @@ fn payee(o: &PaymentRequirements) -> Option<Payee> {
 }
 
 fn lock(dir: &std::path::Path, p: &Payee, i: usize) -> Result<std::fs::File, ConfigError> {
+    use std::os::unix::fs::{DirBuilderExt as _, MetadataExt as _, PermissionsExt as _};
+    let failed = |e: std::io::Error| ConfigError::Lock(e.kind().to_string());
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(dir)
+        .map_err(failed)?;
+    // A directory others can write to would let them plant the lock file (or a link).
+    let meta = std::fs::symlink_metadata(dir).map_err(failed)?;
+    // ... or one another user made in a shared temporary directory (`/proc/self` is
+    // owned by this process's user).
+    let ours = std::fs::metadata("/proc/self").map_or(true, |me| me.uid() == meta.uid());
+    if !meta.is_dir() || meta.permissions().mode() & 0o022 != 0 || !ours {
+        return Err(ConfigError::Lock("lock directory is not private".into()));
+    }
     let name = format!("x402-seller-{}-{:x}.lock", p.0.replace(':', "-"), p.2);
+    let path = dir.join(name);
+    if std::fs::symlink_metadata(&path).is_ok_and(|m| !m.is_file()) {
+        return Err(ConfigError::Lock("lock path is not a file".into()));
+    }
     let file = std::fs::OpenOptions::new()
         .create(true)
         .truncate(false)
         .write(true)
-        .open(dir.join(name))
-        .map_err(|e| ConfigError::Lock(e.kind().to_string()))?;
+        .open(path)
+        .map_err(failed)?;
     match file.try_lock() {
         Ok(()) => Ok(file),
         Err(std::fs::TryLockError::WouldBlock) => Err(ConfigError::PayToLocked(i)),
@@ -205,7 +313,10 @@ impl PaymentLayer {
         if config.accepts.is_empty() {
             return Err(ConfigError::NoOffers);
         }
-        if config.max_in_flight == 0 || config.max_in_flight_per_client == 0 {
+        if config.max_in_flight == 0
+            || config.max_in_flight_per_client == 0
+            || config.max_in_flight_per_network == 0
+        {
             return Err(ConfigError::ZeroBound);
         }
         let mut wanted: Vec<Payee> = Vec::new();
@@ -215,28 +326,40 @@ impl PaymentLayer {
                 wanted.push(p);
             }
         }
-        let mut locks = Vec::new();
-        if let Some(dir) = &config.lock_dir {
-            for (i, p) in wanted.iter().enumerate() {
-                locks.push(lock(dir, p, i)?);
-            }
-        }
         let id = Arc::as_ptr(&store).cast::<()>() as usize;
         {
             let mut all = payees();
             if let Some(i) = wanted
                 .iter()
-                .position(|p| all.get(p).is_some_and(|(owner, _)| *owner != id))
+                .position(|p| all.get(p).is_some_and(|r| r.store != id))
             {
                 return Err(ConfigError::PayToTaken(i));
             }
-            for p in &wanted {
-                all.entry(p.clone()).or_insert((id, 0)).1 += 1;
+            // Locks for payees new to this process, all taken before any is registered.
+            let mut locks = Vec::new();
+            for (i, p) in wanted.iter().enumerate() {
+                if all.contains_key(p) {
+                    locks.push(None);
+                } else if let Some(dir) = &config.lock_dir {
+                    locks.push(Some(lock(dir, p, i)?));
+                } else {
+                    locks.push(None);
+                }
+            }
+            for (p, l) in wanted.iter().zip(locks) {
+                all.entry(p.clone())
+                    .or_insert(Registered {
+                        store: id,
+                        layers: 0,
+                        _lock: l,
+                    })
+                    .layers += 1;
             }
         }
         let gate = Arc::new(Semaphore::new(config.max_in_flight)); // LIMIT(payment-in-flight)
         let clients = Arc::new(Clients {
             per: config.max_in_flight_per_client,
+            per_network: config.max_in_flight_per_network,
             held: Mutex::new(HashMap::new()),
         });
         Ok(Self {
@@ -248,7 +371,6 @@ impl PaymentLayer {
                 gate,
                 clients,
                 payees: wanted,
-                _locks: locks,
             }),
         })
     }
@@ -332,6 +454,23 @@ const RELEASE_ON_SETTLE: [&str; 12] = [
 pub const SETTLE_MISMATCH: &str = "settle_answer_mismatch";
 /// A retry of a payment that settled and was delivered.
 pub const ALREADY_SETTLED: &str = "payment_already_settled";
+/// A retry of a payment that is still being verified, settled or served.
+pub const IN_FLIGHT: &str = "payment_in_flight";
+/// A retry, on another resource, of a payment that was not delivered.
+pub const OTHER_RESOURCE: &str = "payment_for_another_resource";
+/// A payment that was not delivered and is out of attempts: for a dispute.
+pub const NOT_DELIVERED: &str = "payment_not_delivered";
+/// The payer has as many unresolved payments as one payer may.
+pub const PAYER_UNRESOLVED: &str = "payer_unresolved_limit";
+
+/// The resource a request is for: its method and path (not the query).
+fn route_of(req: &Request<Body>) -> Route {
+    let mut buf = Vec::with_capacity(16 + req.uri().path().len());
+    buf.extend_from_slice(req.method().as_str().as_bytes());
+    buf.push(b' ');
+    buf.extend_from_slice(req.uri().path().as_bytes());
+    keccak256(buf)
+}
 
 #[expect(
     clippy::too_many_lines,
@@ -380,10 +519,16 @@ where
     let Ok(permit) = Arc::clone(&s.gate).try_acquire_owned() else {
         return busy();
     };
-    let client = req
-        .extensions()
-        .get::<ConnectInfo<SocketAddr>>()
-        .map(|ConnectInfo(peer)| client_key(*peer, req.headers(), &s.config.trusted_proxies));
+    // Without the peer address no client can be told from another: refuse rather than
+    // run unbounded per client (serve with `into_make_service_with_connect_info`).
+    let Some(ConnectInfo(peer)) = req.extensions().get::<ConnectInfo<SocketAddr>>() else {
+        tracing::error!("x402 request without ConnectInfo: refused");
+        return error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "client_address_unavailable",
+        );
+    };
+    let client = client_ip(*peer, req.headers(), &s.config.trusted_proxies);
     let Some(slot) = Clients::enter(&s.clients, client) else {
         return busy();
     };
@@ -396,15 +541,20 @@ where
         nonce: checked.nonce,
     };
     let expires_at = u64::try_from(checked.valid_before).map_or(latest, |v| v.min(latest));
-    let redeliver = match s.store.claim(key, expires_at).await {
+    let route = route_of(&req);
+    let redeliver = match s.store.claim(key, route, expires_at).await {
         Claim::Fresh => None,
         Claim::Full => return busy(),
+        Claim::PayerBusy => return error(StatusCode::TOO_MANY_REQUESTS, PAYER_UNRESOLVED),
         Claim::Taken(ClaimState::Settled {
             delivery: Delivery::NotDelivered,
             ..
-        }) => match s.store.redeliver(key).await {
-            Some(tx) => Some(tx),
-            None => return error(StatusCode::CONFLICT, "payment_in_flight"),
+        }) => match s.store.redeliver(key, route).await {
+            Redelivery::Serve(tx) => Some(tx),
+            Redelivery::OtherResource => {
+                return error(StatusCode::CONFLICT, OTHER_RESOURCE);
+            }
+            Redelivery::No => return error(StatusCode::CONFLICT, NOT_DELIVERED),
         },
         Claim::Taken(ClaimState::Settled {
             transaction,
@@ -420,7 +570,7 @@ where
             }
             | ClaimState::InFlight,
         ) => {
-            return error(StatusCode::CONFLICT, "payment_in_flight");
+            return error(StatusCode::CONFLICT, IN_FLIGHT);
         }
         Claim::Taken(ClaimState::Held { reason }) => {
             return error(StatusCode::GATEWAY_TIMEOUT, reason);
@@ -480,8 +630,10 @@ fn rebuilt(
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Phase {
-    /// Claimed, outcome not yet known.
+    /// Claimed; nothing has been sent to settle, so nothing can have moved.
     Claimed,
+    /// A settle call is (or may be) under way: the outcome is unknown.
+    Settling,
     /// Settled, not yet delivered.
     Settled,
     /// The claim's fate is recorded.
@@ -489,7 +641,8 @@ enum Phase {
 }
 
 /// Records a claim's fate if its task ends without doing so (a panic in the handler or a
-/// facilitator client): an unknown outcome holds, a settled payment is not delivered.
+/// facilitator client): before settle it is released, during settle it holds, a settled
+/// payment is not delivered.
 struct ClaimGuard {
     store: Arc<dyn NonceStore>,
     key: NonceKey,
@@ -505,10 +658,10 @@ impl Drop for ClaimGuard {
         tracing::warn!(payer = %key.payer, "x402 payment task ended early: claim recorded");
         if let Ok(rt) = tokio::runtime::Handle::try_current() {
             rt.spawn(async move {
-                if phase == Phase::Claimed {
-                    store.hold(key, reason::SETTLE_ERROR).await;
-                } else {
-                    store.delivered(key, false).await;
+                match phase {
+                    Phase::Claimed => store.release(key).await,
+                    Phase::Settling => store.hold(key, reason::SETTLE_ERROR).await,
+                    Phase::Settled | Phase::Done => store.delivered(key, false).await,
                 }
             });
         }
@@ -554,6 +707,7 @@ impl Job {
                 return self.end(resp);
             }
             if shared.config.mode == SettleMode::SettleFirst {
+                self.guard.phase = Phase::Settling;
                 match settle(&shared, key, &self.request, &self.checked).await {
                     Ok(s) => {
                         self.guard.phase = Phase::Settled;
@@ -586,8 +740,10 @@ impl Job {
             self.guard.phase = Phase::Done;
             return;
         }
+        // Any response the handler finished, short of a server error, is the resource:
+        // settle it. A timeout, a 5xx or a panic (the guard) settles nothing.
         let resp = match self.serve(inner, None).await {
-            Some(r) if r.status().is_success() => r,
+            Some(r) if !r.status().is_server_error() => r,
             other => {
                 store.release(key).await;
                 let resp =
@@ -595,6 +751,7 @@ impl Job {
                 return self.end(resp);
             }
         };
+        self.guard.phase = Phase::Settling;
         match settle(&shared, key, &self.request, &self.checked).await {
             Ok(s) => {
                 self.guard.phase = Phase::Settled;
@@ -624,10 +781,12 @@ impl Job {
             .ok()
     }
 
-    /// Hands a paid response back; delivered only if it is a success and the client took it.
+    /// Hands a paid response back. Delivered once the connection took it, whatever its
+    /// status (a redirect, a 304 or a 4xx is the resource), unless the handler timed out
+    /// or failed with a 5xx: only then is a retry of the same proof served again.
     async fn deliver(mut self, resp: Option<Response>) {
+        let ok = resp.as_ref().is_some_and(|r| !r.status().is_server_error());
         let resp = resp.unwrap_or_else(|| error(StatusCode::GATEWAY_TIMEOUT, "handler_timeout"));
-        let ok = resp.status().is_success();
         let (store, key) = (Arc::clone(&self.shared.store), self.guard.key);
         self.guard.phase = Phase::Done;
         let (reply, _) = oneshot::channel();
@@ -758,70 +917,96 @@ async fn settle(
     }
 }
 
-/// Who holds a payment slot: an IPv4 address or an IPv6 /64 (as `xpay_http::client`).
+/// Who holds a payment slot: an IPv4 address or an IPv6 /64 (as `xpay_http::client`), and
+/// the network around it: an IPv4 /24 or an IPv6 /48.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum ClientKey {
-    V4(Ipv4Addr),
-    V6Net([u16; 4]),
+    V4(u32),
+    V6(u64),
+    Net4(u32),
+    Net6(u64),
 }
 
-fn key_of(ip: IpAddr) -> ClientKey {
-    match ip {
-        IpAddr::V4(v4) => ClientKey::V4(v4),
-        IpAddr::V6(v6) => v6.to_ipv4_mapped().map_or_else(
-            || {
-                let s = v6.segments();
-                ClientKey::V6Net([s[0], s[1], s[2], s[3]])
-            },
-            ClientKey::V4,
-        ),
+fn keys_of(ip: IpAddr) -> [ClientKey; 2] {
+    match canonical(ip) {
+        IpAddr::V4(v4) => {
+            let a = u32::from(v4);
+            [ClientKey::V4(a), ClientKey::Net4(a >> 8)]
+        }
+        IpAddr::V6(v6) => {
+            let a = u128::from(v6);
+            let (net64, net48) = ((a >> 64) as u64, (a >> 80) as u64);
+            [ClientKey::V6(net64), ClientKey::Net6(net48)]
+        }
     }
 }
 
-/// The TCP peer, or — only from a trusted proxy — the right-most `X-Forwarded-For` hop.
-fn client_key(peer: SocketAddr, headers: &HeaderMap, trusted: &[IpAddr]) -> ClientKey {
-    if trusted.contains(&peer.ip())
-        && let Some(line) = headers.get_all("x-forwarded-for").iter().next_back()
-        && let Some(hop) = line.to_str().ok().and_then(|l| l.rsplit(',').next())
-        && let Ok(ip) = hop.trim().parse::<IpAddr>()
-    {
-        return key_of(ip);
+/// Most `X-Forwarded-For` hops walked through trusted proxies.
+const MAX_PROXY_HOPS: usize = 8;
+
+/// The TCP peer, or — through trusted proxies — the right-most `X-Forwarded-For` hop that
+/// is not a trusted proxy. Hops to its left were written by the client and are never
+/// believed; a hop that does not parse stops the walk at the last trusted hop.
+fn client_ip(peer: SocketAddr, headers: &HeaderMap, trusted: &[ProxyNet]) -> IpAddr {
+    let is_trusted = |ip: IpAddr| trusted.iter().any(|n| n.contains(ip));
+    let mut client = canonical(peer.ip());
+    if !is_trusted(client) {
+        return client;
     }
-    key_of(peer.ip())
+    let lines: Vec<&str> = headers
+        .get_all("x-forwarded-for")
+        .iter()
+        .map(|v| v.to_str().unwrap_or(""))
+        .collect();
+    let hops = lines.iter().rev().flat_map(|l| l.rsplit(','));
+    for hop in hops.take(MAX_PROXY_HOPS) {
+        let Ok(ip) = hop.trim().parse::<IpAddr>() else {
+            return client;
+        };
+        client = canonical(ip);
+        if !is_trusted(client) {
+            return client;
+        }
+    }
+    client
 }
 
-/// Payment slots per client. Bounded by `max_in_flight`: a slot is only taken with a permit.
+/// Payment slots per client and per network. Bounded by `max_in_flight`: a slot is only
+/// taken with a permit.
 struct Clients {
     per: usize,
+    per_network: usize,
     held: Mutex<HashMap<ClientKey, usize>>,
 }
 
 impl Clients {
-    fn enter(this: &Arc<Self>, client: Option<ClientKey>) -> Option<ClientSlot> {
-        let Some(key) = client else {
-            return Some(ClientSlot(None));
-        };
+    fn enter(this: &Arc<Self>, ip: IpAddr) -> Option<ClientSlot> {
+        let [client, net] = keys_of(ip);
         let mut held = this.held.lock().unwrap_or_else(PoisonError::into_inner);
-        let n = held.entry(key).or_insert(0);
         // LIMIT(payment-per-client)
-        if *n >= this.per {
+        if held.get(&client).copied().unwrap_or(0) >= this.per {
             return None;
         }
-        *n += 1;
-        Some(ClientSlot(Some((Arc::clone(this), key))))
+        // LIMIT(payment-per-network)
+        if held.get(&net).copied().unwrap_or(0) >= this.per_network {
+            return None;
+        }
+        *held.entry(client).or_insert(0) += 1;
+        *held.entry(net).or_insert(0) += 1;
+        Some(ClientSlot(Arc::clone(this), [client, net]))
     }
 }
 
-struct ClientSlot(Option<(Arc<Clients>, ClientKey)>);
+struct ClientSlot(Arc<Clients>, [ClientKey; 2]);
 
 impl Drop for ClientSlot {
     fn drop(&mut self) {
-        if let Some((clients, key)) = self.0.take() {
-            let mut held = clients.held.lock().unwrap_or_else(PoisonError::into_inner);
-            if let Some(n) = held.get_mut(&key) {
+        let mut held = self.0.held.lock().unwrap_or_else(PoisonError::into_inner);
+        for key in &self.1 {
+            if let Some(n) = held.get_mut(key) {
                 *n -= 1;
                 if *n == 0 {
-                    held.remove(&key);
+                    held.remove(key);
                 }
             }
         }
