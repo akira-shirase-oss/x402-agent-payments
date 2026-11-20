@@ -149,6 +149,8 @@ None of this is legal advice.
    this payment" as paid, idempotently.
 6. **Redirects.** reqwest follows redirects by default (UNVERIFIED for 0.13's default policy). The buyer must run the
    domain allowlist against the URL that returned the 402, not the URL it first requested.
+   M1: the wallet and the facilitator client disable redirects (`redirect::Policy::none()`), so the URL that returned
+   the 402 is the one requested and allowlisted.
 
 ## 6. Rust implementations
 
@@ -156,6 +158,8 @@ None of this is legal advice.
   x402`) and Go, and there is a `java/` directory (https://github.com/x402-foundation/x402).
   - Observed versions: `@x402/core`, `@x402/evm`, `@x402/express`, `@x402/fetch` and `@x402/hono` are 2.31.0
     (2026-11-12); the Go module is v2.31.0; PyPI `x402` is 2.28.0.
+  - Re-checked at M1: the repository at commit `e35bf8846f3e40f584f7235ea96c0841cb597b27` carries `@x402/core` 2.32.0;
+    PyPI `x402` is still 2.28.0, which the conformance gate pins.
   - The legacy v1 npm packages `x402` and `x402-express` stopped at 1.2.0 (2026-04-16).
   - The official TypeScript SDK already ships `@x402/mcp`, which overlaps the spec's MCP stretch goal.
 - **x402-rs** (community, Apache-2.0, https://github.com/x402-rs/x402-rs):
