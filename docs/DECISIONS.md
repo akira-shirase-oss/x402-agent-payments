@@ -227,7 +227,8 @@ against a 64-claim store, with thresholds written before the first run.
   `x402_dispute` error record and the `dropped()` counter, never blocking new claims;
   `drain_to_log` writes listed entries to a `DisputeLog` (`FileDisputeLog`: fsynced JSON
   lines) and removes only what was written. One payer holds at most
-  `MAX_UNDECIDED_PER_PAYER` undecided claims (`429 payer_unresolved_limit`). A
+  `MAX_UNDECIDED_PER_PAYER` list entries: past it that payer's own oldest is dropped
+  (logged, counted), never another payer's, and no claim is refused for it. A
   settle-after handler that fails before settlement starts releases its claim.
 - **Clients.** A request without the peer address is refused (500
   `client_address_unavailable`), never served unbounded. Payment slots are bounded per
