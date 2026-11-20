@@ -62,3 +62,33 @@ fn the_mock_facilitator_binary_serves_supported() {
         "{resp}"
     );
 }
+
+#[test]
+fn the_mock_facilitator_binary_listens_on_loopback_only() {
+    for addr in ["0.0.0.0:0", "[::]:0"] {
+        let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_xpay-mock-facilitator"))
+            .args(["--listen", addr])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        // A refused address exits at once; a listener would run until killed.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        let status = loop {
+            if let Some(s) = child.try_wait().unwrap() {
+                break Some(s);
+            }
+            if std::time::Instant::now() > deadline {
+                child.kill().unwrap();
+                child.wait().unwrap();
+                break None;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        };
+        let mut err = String::new();
+        std::io::Read::read_to_string(&mut child.stderr.take().unwrap(), &mut err).unwrap();
+        assert!(status.is_some_and(|s| !s.success()), "{addr} accepted");
+        assert!(err.contains("loopback"), "{err}");
+    }
+}

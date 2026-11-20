@@ -1,4 +1,4 @@
-//! A local x402 facilitator for tests and development: no chain, no network.
+//! A local x402 facilitator for tests and development: no chain, no network, Base Sepolia only.
 //!
 //! `verify` runs every offline exact-EVM check (signature recovery under the network's USDC
 //! domain included) and the nonce ledger; `settle` does the same, then records the
@@ -103,6 +103,10 @@ impl MockFacilitator {
     fn check(&self, req: &FacilitatorRequest) -> Result<exact::Verified, &'static str> {
         if req.x402_version != X402_VERSION {
             return Err(reason::VERSION);
+        }
+        // Development only: no chain, no balances, so never a network where money is real.
+        if req.payment_requirements.network.as_str() != Caip2::BASE_SEPOLIA {
+            return Err(reason::NETWORK);
         }
         let d = exact::usdc(&req.payment_requirements.network).ok_or(reason::NETWORK)?;
         if !req
@@ -221,6 +225,7 @@ impl MockFacilitator {
         SupportedResponse {
             kinds: USDC
                 .iter()
+                .filter(|d| d.network == Caip2::BASE_SEPOLIA)
                 .filter_map(|d| Caip2::parse(d.network).ok())
                 .map(|network| SupportedKind {
                     x402_version: X402_VERSION,
@@ -288,4 +293,57 @@ async fn http_settle(
     axum::Json(req): axum::Json<FacilitatorRequest>,
 ) -> Response {
     answer(m.settle(req).await)
+}
+
+#[cfg(test)]
+mod network_tests {
+    use super::*;
+    use alloy_primitives::{Address, B256, U256};
+    use xpay_x402::clock::ManualClock;
+
+    #[test]
+    fn it_supports_base_sepolia_only() {
+        let kinds = MockFacilitator::supported().kinds;
+        assert_ne!(kinds.len(), 0);
+        assert!(
+            kinds
+                .iter()
+                .all(|k| k.network.as_str() == Caip2::BASE_SEPOLIA),
+            "{kinds:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_mainnet_payment_is_never_verified_or_settled() {
+        let now = 1_800_000_000;
+        let mock = MockFacilitator::new(Arc::new(ManualClock::at(now)));
+        let signer =
+            alloy_signer_local::PrivateKeySigner::from_bytes(&B256::repeat_byte(0x11)).unwrap();
+        let req = exact::usdc_requirements(
+            &Caip2::parse(Caip2::BASE).unwrap(),
+            U256::from(10_000u64),
+            Address::repeat_byte(0x20),
+            60,
+        )
+        .unwrap();
+        let payload = exact::pay(
+            &signer,
+            signer.address(),
+            &req,
+            None,
+            now,
+            B256::repeat_byte(1),
+        )
+        .unwrap();
+        let r = FacilitatorRequest {
+            x402_version: X402_VERSION,
+            payment_payload: payload,
+            payment_requirements: req,
+        };
+        let v = mock.verify(r.clone()).await.unwrap();
+        assert_eq!(v.invalid_reason.as_deref(), Some(reason::NETWORK), "{v:?}");
+        let s = mock.settle(r).await.unwrap();
+        assert!(!s.success, "{s:?}");
+        assert_eq!(mock.settled_count(), 0);
+    }
 }

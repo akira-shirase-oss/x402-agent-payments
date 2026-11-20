@@ -231,9 +231,9 @@ pub fn recover(signature: &str, hash: &B256) -> Result<Address, &'static str> {
         return Err(reason::SIGNATURE);
     }
     let bytes = alloy_primitives::hex::decode(hex).map_err(|_| reason::SIGNATURE)?;
-    // USDC's ecrecover takes v = 27 or 28 (0 and 1 are the same parity in another
-    // spelling); anything else is a different string for the same signature.
-    if !matches!(bytes.get(64), Some(0 | 1 | 27 | 28)) {
+    // USDC's ecrecover takes only v = 27 or 28: a 0/1 spelling would pass an offline check
+    // and fail on chain, and any other byte is another string for the same signature.
+    if !matches!(bytes.get(64), Some(27 | 28)) {
         return Err(reason::SIGNATURE);
     }
     let sig = Signature::from_raw(&bytes).map_err(|_| reason::SIGNATURE)?;
@@ -344,7 +344,7 @@ mod v_byte_tests {
     use super::*;
 
     #[test]
-    fn only_v_27_28_0_1_are_accepted() {
+    fn only_v_27_28_are_accepted() {
         let signer =
             alloy_signer_local::PrivateKeySigner::from_bytes(&B256::repeat_byte(0x11)).unwrap();
         let hash = B256::repeat_byte(0x42);
@@ -352,11 +352,12 @@ mod v_byte_tests {
         for v in [0u8, 1, 27, 28, 59, 60, 2, 255] {
             let mut b = sig;
             b[64] = v;
-            let parity_ok = (b[64] == 27 || b[64] == 0) == (sig[64] == 27);
             let got = recover(&format!("0x{}", alloy_primitives::hex::encode(b)), &hash);
             match v {
-                0 | 1 | 27 | 28 if parity_ok => assert_eq!(got, Ok(signer.address()), "v={v}"),
-                0 | 1 | 27 | 28 => assert_ne!(got, Ok(signer.address()), "v={v}"),
+                // The token's ecrecover only takes 27/28: a 0/1 spelling would pass here
+                // and fail on chain, so it is a different string for one signature.
+                27 | 28 if v == sig[64] => assert_eq!(got, Ok(signer.address()), "v={v}"),
+                27 | 28 => assert_ne!(got, Ok(signer.address()), "v={v}"),
                 _ => assert_eq!(got, Err(reason::SIGNATURE), "v={v}"),
             }
         }

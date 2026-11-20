@@ -1,5 +1,5 @@
 //! The mock x402 facilitator over HTTP, for local development: real signature checks, an
-//! in-memory nonce ledger, no chain.
+//! in-memory nonce ledger, no chain. Base Sepolia only, loopback only.
 //!
 //!   xpay-mock-facilitator [--listen 127.0.0.1:63360]
 
@@ -14,7 +14,12 @@ async fn main() -> anyhow::Result<()> {
         (Some("--listen"), Some(a), None) => a,
         _ => anyhow::bail!("usage: xpay-mock-facilitator [--listen ADDR]"),
     };
-    let listener = TcpListener::bind(&addr).await.context("bind")?;
+    let addr: std::net::SocketAddr = addr.parse().context("--listen takes IP:PORT")?;
+    anyhow::ensure!(
+        addr.ip().is_loopback(),
+        "the mock facilitator listens on loopback only"
+    );
+    let listener = TcpListener::bind(addr).await.context("bind")?;
     println!("listening on {}", listener.local_addr()?);
     xpay_x402_dev::serve(
         listener,
