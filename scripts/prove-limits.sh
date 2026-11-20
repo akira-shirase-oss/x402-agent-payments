@@ -47,7 +47,7 @@ mutations=(
   "mail-per-address|crates/xpay-accounts/src/signin.rs|self\.per_address\.take\(address\)\?;=>let _ = self.per_address.take(address);|xpay-accounts|budgets|mail_a_client_can_cause_is_bounded"
   "payment-header|crates/xpay-x402/src/codec.rs|8 \* 1024=>64 * 1024|xpay-x402|lib|codec::tests::refuses_oversized_before_decoding"
   "nonce-store|crates/xpay-seller/src/store.rs|return Claim::Full;=>{}|xpay-seller|lib|store::tests::a_full_store_sheds_only_expired_claims_and_lists_the_undecided"
-  "reconcile-list|crates/xpay-seller/src/store.rs|inner\.reconcile_order\.pop_first\(\)=>None::<(u64, NonceKey)>|xpay-seller|lib|store::tests::a_full_reconciliation_list_drops_its_oldest_entry_and_counts_it"
+  "reconcile-list|crates/xpay-seller/src/store.rs|inner\.reconcile_order\.first_key_value\(\)=>None::<(&u64, &NonceKey)>|xpay-seller|lib|store::tests::a_full_reconciliation_list_drops_its_oldest_entry_and_counts_it"
   "payer-undecided|crates/xpay-seller/src/store.rs|>= self\.per_payer\.max\(1\)=>>= usize::MAX|xpay-seller|lib|store::tests::one_payers_share_of_the_list_is_bounded_and_never_refuses_a_claim"
   "redeliveries|crates/xpay-seller/src/store.rs|^.*$=>                *redeliveries = 0;|xpay-seller|lib|store::tests::redelivery_is_for_the_same_resource_and_bounded"
   "payment-in-flight|crates/xpay-seller/src/layer.rs|config\.max_in_flight\)=>Semaphore::MAX_PERMITS)|xpay-seller|lifecycle|hang_ups_cannot_grow_facilitator_work_past_the_in_flight_bound"
