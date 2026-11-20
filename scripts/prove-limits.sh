@@ -45,6 +45,8 @@ mutations=(
   "sign-in-per-address|crates/xpay-accounts/src/signin.rs|self\.per_address\.take\(address\)\?;=>let _ = self.per_address.take(address);|xpay-accounts|budgets|one_address_flood_bounds_only_that_address"
   "sign-in-global|crates/xpay-accounts/src/signin.rs|self\.global\.take\(\)=>Ok::<(), RetryAfter>(())|xpay-accounts|budgets|a_distributed_flood_cannot_lock_out_a_trusted_owner"
   "mail-per-address|crates/xpay-accounts/src/signin.rs|self\.per_address\.take\(address\)\?;=>let _ = self.per_address.take(address);|xpay-accounts|budgets|mail_a_client_can_cause_is_bounded"
+  "x402-header|crates/xpay-x402/src/codec.rs|8 \* 1024=>usize::MAX|xpay-x402|lib|codec::tests::refuses_oversized_before_decoding"
+  "nonce-store|crates/xpay-seller/src/store.rs|return Claim::Full;=>{}|xpay-seller|lib|store::tests::full_store_drops_only_expired_settled_claims"
   "password-concurrency|crates/xpay-accounts/src/password.rs|concurrency\.max\(1\)=>Semaphore::MAX_PERMITS|xpay-accounts|lib|password::tests::at_most_the_concurrency_hashes_at_once"
   "plan|crates/xpay-accounts/src/domain.rs|current < i64::from\(limit\)=>true|xpay-accounts|limits|token_and_workspace_limits_hold_under_concurrency"
   "ready-deadline|crates/xpay-server/src/health.rs|self\.deadline=>Duration::from_secs(3600)|xpay-server|health|readyz_reports_a_silent_database_within_its_deadline"

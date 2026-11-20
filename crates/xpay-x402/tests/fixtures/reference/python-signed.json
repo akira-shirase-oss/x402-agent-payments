@@ -1,0 +1,97 @@
+{
+  "source": "x402==2.28.0 (PyPI) ExactEvmScheme client",
+  "signed": [
+    {
+      "name": "python-signed-eip155:84532",
+      "now": 1800000000,
+      "payer": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A",
+      "payload": {
+        "x402Version": 2,
+        "payload": {
+          "authorization": {
+            "from": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A",
+            "to": "0x209693Bc6afc0C5328bA36FaF03C514EF312287C",
+            "value": "10000",
+            "validAfter": "0",
+            "validBefore": "1800000060",
+            "nonce": "0xb2b15965214713b4890f4abd5f17f3cf10e857d4ef80e7637a8bc36b0cd5caaa"
+          },
+          "signature": "0xc887a481fa2936a87d1aed1c97480d13ac931e2d3061387231e6acd5266f33f05d8dd5194f984406a96b72947fbb44e941500f130daa9ba8e6b74acc02b68fdc1b"
+        },
+        "accepted": {
+          "scheme": "exact",
+          "network": "eip155:84532",
+          "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+          "amount": "10000",
+          "payTo": "0x209693Bc6afc0C5328bA36FaF03C514EF312287C",
+          "maxTimeoutSeconds": 60,
+          "extra": {
+            "name": "USDC",
+            "version": "2"
+          }
+        },
+        "resource": {
+          "url": "https://api.example.com/premium-data"
+        }
+      },
+      "requirements": {
+        "scheme": "exact",
+        "network": "eip155:84532",
+        "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+        "amount": "10000",
+        "payTo": "0x209693Bc6afc0C5328bA36FaF03C514EF312287C",
+        "maxTimeoutSeconds": 60,
+        "extra": {
+          "name": "USDC",
+          "version": "2"
+        }
+      }
+    },
+    {
+      "name": "python-signed-eip155:8453",
+      "now": 1800000000,
+      "payer": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A",
+      "payload": {
+        "x402Version": 2,
+        "payload": {
+          "authorization": {
+            "from": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A",
+            "to": "0x209693Bc6afc0C5328bA36FaF03C514EF312287C",
+            "value": "10000",
+            "validAfter": "0",
+            "validBefore": "1800000060",
+            "nonce": "0xe092cad02c64a3064c738a0af7ad3e50b7ba69f6c8caa2a7cc1cffd618e801a6"
+          },
+          "signature": "0x44519ad41e8e53eb301ae65ccdae3a6f3878633834d50e1afdc0307323622fc75ab224103fc36c1fc968995a8540da563e7acc1b98256b4952700c036aefe7171c"
+        },
+        "accepted": {
+          "scheme": "exact",
+          "network": "eip155:8453",
+          "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "amount": "10000",
+          "payTo": "0x209693Bc6afc0C5328bA36FaF03C514EF312287C",
+          "maxTimeoutSeconds": 60,
+          "extra": {
+            "name": "USD Coin",
+            "version": "2"
+          }
+        },
+        "resource": {
+          "url": "https://api.example.com/premium-data"
+        }
+      },
+      "requirements": {
+        "scheme": "exact",
+        "network": "eip155:8453",
+        "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+        "amount": "10000",
+        "payTo": "0x209693Bc6afc0C5328bA36FaF03C514EF312287C",
+        "maxTimeoutSeconds": 60,
+        "extra": {
+          "name": "USD Coin",
+          "version": "2"
+        }
+      }
+    }
+  ]
+}

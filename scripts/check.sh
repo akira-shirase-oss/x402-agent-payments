@@ -5,7 +5,8 @@
 #   scripts/check.sh
 #
 # Toolchain pin, formatting, Clippy with warnings denied, the architecture, pin and results
-# checks (each shown able to fail), the host layer's checks, every test against PostgreSQL
+# checks (each shown able to fail), the host layer's checks, every test against PostgreSQL,
+# the x402 conformance check against the official reference (scripts/check-x402-reference.sh)
 # (the local stack starts when XPAY_TEST_DATABASE_URL is unset), the restore drills with
 # their controls and the upgrade rehearsal, then cargo-deny. The limit proofs
 # (scripts/prove-limits.sh) run as their own CI job.
@@ -108,6 +109,18 @@ if [ -z "${XPAY_TEST_DATABASE_URL:-}" ]; then
 fi
 export XPAY_TEST_DATABASE_URL
 cargo test --workspace --locked
+
+step "x402 conformance: the official reference parses and verifies what we emit, and can fail"
+scripts/check-x402-reference.sh
+sample="$(mktemp)"
+sed 's/"expect": "invalid_exact_evm_payload_recipient_mismatch"/"expect": "valid"/' \
+  crates/xpay-x402/tests/fixtures/emitted.json >"$sample"
+if scripts/check-x402-reference.sh "$sample" >/dev/null 2>&1; then
+  echo "error: the reference check passed a wrong verdict" >&2
+  rm -f "$sample"
+  exit 1
+fi
+rm -f "$sample"
 
 step "drills: PostgreSQL and SQLite restore, their controls, the upgrade rehearsal"
 # A pinned age installed into this copy's target (scripts/install-age.sh target/tools/bin).
