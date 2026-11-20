@@ -41,7 +41,9 @@ pub const EXPIRED_IN_FLIGHT: &str = "expired_in_flight";
 
 /// How many times one paid-but-not-delivered payment is served again.
 pub const MAX_REDELIVERIES: u8 = 3;
-/// Default bound on one payer's undecided claims (held, paid but not delivered, listed).
+/// Default bound on one payer's share of the reconciliation list: past it, that payer's
+/// own oldest entry is dropped (logged and counted), never another payer's, and no claim
+/// is refused.
 pub const MAX_UNDECIDED_PER_PAYER: usize = 16;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -57,20 +59,6 @@ pub enum ClaimState {
     Held { reason: &'static str },
 }
 
-impl ClaimState {
-    /// The outcome needs a reconciler or a dispute.
-    fn undecided(&self) -> bool {
-        matches!(
-            self,
-            Self::Held { .. }
-                | Self::Settled {
-                    delivery: Delivery::NotDelivered,
-                    ..
-                }
-        )
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Claim {
     /// The claim is ours.
@@ -79,8 +67,6 @@ pub enum Claim {
     Taken(ClaimState),
     /// The store is at capacity with nothing it may drop.
     Full,
-    /// This payer already has as many undecided claims as one payer may.
-    PayerBusy,
 }
 
 /// The answer to [`NonceStore::redeliver`].
@@ -209,31 +195,25 @@ struct Inner {
     reconcile: HashMap<NonceKey, (u64, &'static str)>,
     reconcile_order: BTreeMap<u64, NonceKey>,
     next_order: u64,
-    /// Undecided claims per payer, hot or listed.
-    undecided: HashMap<Address, usize>,
+    /// Listed entries per payer, by order.
+    by_payer: HashMap<Address, BTreeSet<u64>>,
 }
 
 impl Inner {
-    fn count(&mut self, payer: Address, was: bool, now: bool) {
-        match (was, now) {
-            (false, true) => *self.undecided.entry(payer).or_default() += 1,
-            (true, false) => {
-                if let Some(n) = self.undecided.get_mut(&payer) {
-                    *n = n.saturating_sub(1);
-                    if *n == 0 {
-                        self.undecided.remove(&payer);
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-
     fn unlist(&mut self, key: &NonceKey) -> Option<&'static str> {
         let (order, reason) = self.reconcile.remove(key)?;
         self.reconcile_order.remove(&order);
-        self.count(key.payer, true, false);
+        self.unpay(key.payer, order);
         Some(reason)
+    }
+
+    fn unpay(&mut self, payer: Address, order: u64) {
+        if let Some(set) = self.by_payer.get_mut(&payer) {
+            set.remove(&order);
+            if set.is_empty() {
+                self.by_payer.remove(&payer);
+            }
+        }
     }
 }
 
@@ -307,29 +287,45 @@ impl MemoryNonceStore {
             *listed = reason;
             return;
         }
+        let share = inner.by_payer.get(&key.payer).map_or(0, BTreeSet::len);
+        // LIMIT(payer-undecided)
+        if share >= self.per_payer.max(1) {
+            let own = inner
+                .by_payer
+                .get(&key.payer)
+                .and_then(|o| o.first().copied());
+            if let Some(oldest) = own.and_then(|o| inner.reconcile_order.get(&o).copied()) {
+                self.drop_listed(inner, oldest);
+            }
+        }
         while inner.reconcile.len() >= self.capacity.max(1) {
             // LIMIT(reconcile-list)
-            let Some((_, oldest)) = inner.reconcile_order.pop_first() else {
+            let Some((_, oldest)) = inner.reconcile_order.first_key_value() else {
                 break;
             };
-            if let Some((_, r)) = inner.reconcile.remove(&oldest) {
-                inner.count(oldest.payer, true, false);
-                self.dropped.fetch_add(1, Ordering::Relaxed);
-                tracing::error!(
-                    target: "x402_dispute",
-                    asset = %oldest.asset,
-                    payer = %oldest.payer,
-                    nonce = %oldest.nonce,
-                    reason = r,
-                    "x402 reconciliation list full: oldest undecided claim dropped"
-                );
-            }
+            let oldest = *oldest;
+            self.drop_listed(inner, oldest);
         }
         let order = inner.next_order;
         inner.next_order += 1;
         inner.reconcile.insert(key, (order, reason));
         inner.reconcile_order.insert(order, key);
-        inner.count(key.payer, false, true);
+        inner.by_payer.entry(key.payer).or_default().insert(order);
+    }
+
+    /// Drops a listed entry to the error log and counts it.
+    fn drop_listed(&self, inner: &mut Inner, oldest: NonceKey) {
+        if let Some(r) = inner.unlist(&oldest) {
+            self.dropped.fetch_add(1, Ordering::Relaxed);
+            tracing::error!(
+                target: "x402_dispute",
+                asset = %oldest.asset,
+                payer = %oldest.payer,
+                nonce = %oldest.nonce,
+                reason = r,
+                "x402 reconciliation list full: oldest undecided claim dropped"
+            );
+        }
     }
 
     fn sweep(&self, inner: &mut Inner) {
@@ -342,8 +338,6 @@ impl MemoryNonceStore {
             let Some(e) = inner.entries.remove(&key) else {
                 continue;
             };
-            let was = e.state.undecided();
-            inner.count(key.payer, was, false);
             let listed = match e.state {
                 ClaimState::Settled {
                     delivery: Delivery::Delivered,
@@ -371,9 +365,6 @@ impl MemoryNonceStore {
         if inner.entries.len() >= self.capacity {
             return Claim::Full; // LIMIT(nonce-store)
         }
-        if inner.undecided.get(&key.payer).copied().unwrap_or(0) >= self.per_payer {
-            return Claim::PayerBusy; // LIMIT(payer-undecided)
-        }
         inner.entries.insert(
             key,
             Entry {
@@ -392,9 +383,7 @@ impl MemoryNonceStore {
     fn set(&self, key: NonceKey, state: ClaimState) {
         let mut inner = self.inner();
         if let Some(e) = inner.entries.get_mut(&key) {
-            let (was, now) = (e.state.undecided(), state.undecided());
             e.state = state;
-            inner.count(key.payer, was, now);
             return;
         }
         let late = match state {
@@ -416,7 +405,6 @@ impl MemoryNonceStore {
         let mut inner = self.inner();
         if let Some(e) = inner.entries.remove(&key) {
             inner.by_expiry.remove(&(e.expires_at, key));
-            inner.count(key.payer, e.state.undecided(), false);
         }
     }
 }
@@ -482,7 +470,6 @@ impl NonceStore for MemoryNonceStore {
                 *redeliveries += 1;
                 *delivery = Delivery::Serving;
                 let tx = transaction.clone();
-                inner.count(key.payer, true, false);
                 Redelivery::Serve(tx)
             }
             _ => Redelivery::No,
@@ -686,28 +673,31 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn one_payers_undecided_claims_are_bounded() {
+    async fn one_payers_share_of_the_list_is_bounded_and_never_refuses_a_claim() {
         let clock = ManualClock::at(100);
         let s = MemoryNonceStore::new(64, Arc::new(clock.clone())).with_max_undecided_per_payer(2);
-        for n in 0..2 {
+        let other = NonceKey {
+            payer: Address::repeat_byte(2),
+            ..key(9)
+        };
+        assert_eq!(s.claim(other, R, 150).await, Claim::Fresh);
+        s.hold(other, "settle_timeout").await;
+        for n in 0..4 {
             assert_eq!(s.claim(key(n), R, 150).await, Claim::Fresh);
             s.hold(key(n), "settle_timeout").await;
         }
-        assert_eq!(s.claim(key(2), R, 150).await, Claim::PayerBusy);
-        let other = NonceKey {
-            payer: Address::repeat_byte(2),
-            ..key(2)
-        };
-        assert_eq!(
-            s.claim(other, R, 150).await,
-            Claim::Fresh,
-            "other payers unaffected"
-        );
         clock.set(151);
-        // Expired, the two are listed and still count until the dispute log takes them.
-        assert_eq!(s.claim(key(3), R, 300).await, Claim::PayerBusy);
-        assert_eq!(s.resolve(s.listed(10).await).await, 3);
-        assert_eq!(s.claim(key(3), R, 300).await, Claim::Fresh);
+        for n in 10..30 {
+            assert_eq!(s.claim(key(n), R, 300).await, Claim::Fresh, "never refused");
+        }
+        let listed: std::collections::HashSet<NonceKey> =
+            s.listed(64).await.into_iter().map(|l| l.key).collect();
+        assert_eq!(
+            listed,
+            std::collections::HashSet::from([other, key(2), key(3)]),
+            "the payer's own oldest went, never another payer's"
+        );
+        assert_eq!(s.dropped(), 2);
     }
 
     #[tokio::test]

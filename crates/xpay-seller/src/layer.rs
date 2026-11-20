@@ -460,8 +460,6 @@ pub const IN_FLIGHT: &str = "payment_in_flight";
 pub const OTHER_RESOURCE: &str = "payment_for_another_resource";
 /// A payment that was not delivered and is out of attempts: for a dispute.
 pub const NOT_DELIVERED: &str = "payment_not_delivered";
-/// The payer has as many unresolved payments as one payer may.
-pub const PAYER_UNRESOLVED: &str = "payer_unresolved_limit";
 
 /// The resource a request is for: its method and path (not the query).
 fn route_of(req: &Request<Body>) -> Route {
@@ -545,7 +543,6 @@ where
     let redeliver = match s.store.claim(key, route, expires_at).await {
         Claim::Fresh => None,
         Claim::Full => return busy(),
-        Claim::PayerBusy => return error(StatusCode::TOO_MANY_REQUESTS, PAYER_UNRESOLVED),
         Claim::Taken(ClaimState::Settled {
             delivery: Delivery::NotDelivered,
             ..
