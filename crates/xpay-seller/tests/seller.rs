@@ -67,7 +67,7 @@ async fn no_payment_answers_402_with_the_requirements_and_per_network_domains() 
     );
     assert_eq!(
         a.body["accepts"][0]["payTo"],
-        json!(SELLER.to_checksum(None))
+        json!(seller().to_checksum(None))
     );
     assert_eq!(w.served.load(Ordering::SeqCst), 0);
 }
@@ -99,8 +99,14 @@ async fn a_replayed_payment_is_refused_and_never_served_twice() {
     let h = header(&pay(&offer(Caip2::BASE_SEPOLIA), 2));
     assert_eq!(get_paid(&w.app, Some(&h)).await.status, StatusCode::OK);
     let again = get_paid(&w.app, Some(&h)).await;
-    assert_eq!(again.status, StatusCode::PAYMENT_REQUIRED);
-    assert_eq!(error_of(&again), reason::NONCE_REUSED);
+    // Never a 402 for money that moved: a wallet must not take it as "not paid".
+    assert_eq!(
+        (again.status, error_of(&again)),
+        (StatusCode::CONFLICT, xpay_seller::layer::ALREADY_SETTLED)
+    );
+    let settle: SettleResponse =
+        decode_header(again.headers["payment-response"].as_bytes()).unwrap();
+    assert!(settle.success);
     assert_eq!(w.served.load(Ordering::SeqCst), 1);
 }
 
@@ -165,7 +171,7 @@ async fn an_authorization_valid_too_long_is_refused() {
     let b = buyer();
     let auth = TypedAuthorization {
         from: b.address(),
-        to: SELLER,
+        to: seller(),
         value: U256::from(10_000),
         valid_after: U256::ZERO,
         valid_before: U256::from(NOW + 86_400),
@@ -441,9 +447,10 @@ async fn settle_after_mode_serves_then_settles_and_a_failed_handler_releases() {
     assert!(a.headers.contains_key("payment-response"));
     assert_eq!(
         get_paid(&w.app, Some(&header(&p))).await.status,
-        StatusCode::PAYMENT_REQUIRED
+        StatusCode::CONFLICT
     );
     assert_eq!(w.served.load(Ordering::SeqCst), 1);
+    drop(w); // one store per payee (D-017)
 
     let failing = paywall(Setup {
         mode: SettleMode::SettleAfter,
@@ -550,7 +557,7 @@ async fn the_claim_alone_stops_replays_when_the_facilitator_always_says_yes() {
     let later = get_paid(&w.app, Some(&h)).await;
     assert_eq!(
         (later.status, error_of(&later)),
-        (StatusCode::PAYMENT_REQUIRED, reason::NONCE_REUSED)
+        (StatusCode::CONFLICT, xpay_seller::layer::ALREADY_SETTLED)
     );
     assert_eq!(w.served.load(Ordering::SeqCst), 1);
 }

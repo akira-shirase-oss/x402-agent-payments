@@ -17,5 +17,9 @@ tokio.workspace = true
 tracing.workspace = true
 xpay-x402.workspace = true
 
+[dev-dependencies]
+alloy-signer-local.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
+
 [lints]
 workspace = true

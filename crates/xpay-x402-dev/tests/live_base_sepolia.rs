@@ -14,7 +14,7 @@ use std::time::Duration;
 
 use alloy_primitives::U256;
 use alloy_signer_local::PrivateKeySigner;
-use xpay_wallet::{Limits, Policy, Wallet};
+use xpay_wallet::{AllowedHost, Limits, Policy, Wallet};
 use xpay_x402::Caip2;
 use xpay_x402::clock::SystemClock;
 
@@ -43,7 +43,10 @@ async fn live_base_sepolia_pay_and_settle() {
         Arc::new(signer),
         address,
         Policy {
-            allow_hosts: vec![addr.to_string()],
+            allow_hosts: vec![AllowedHost::new(
+                addr.to_string(),
+                vec![xpay_x402_dev::pay_to().unwrap()],
+            )],
             networks: vec![Caip2::parse(Caip2::BASE_SEPOLIA).unwrap()],
             max_per_payment: U256::from(xpay_x402_dev::PRICE),
             total_cap: U256::from(xpay_x402_dev::PRICE),

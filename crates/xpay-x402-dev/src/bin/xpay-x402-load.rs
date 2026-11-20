@@ -150,7 +150,7 @@ async fn main() -> anyhow::Result<()> {
             Arc::new(mock.clone()),
             store,
             Arc::new(SystemClock),
-        ));
+        )?);
 
     let gate = Arc::new(Semaphore::new(concurrency));
     let started = Instant::now();

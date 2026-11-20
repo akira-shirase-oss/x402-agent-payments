@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
-use alloy_primitives::{Address, B256, U256, address};
+use alloy_primitives::{Address, B256, U256};
 use alloy_signer_local::PrivateKeySigner;
 use axum::Router;
 use axum::body::Body;
@@ -21,7 +21,20 @@ use xpay_x402::clock::ManualClock;
 use xpay_x402::{Caip2, PaymentPayload, PaymentRequirements, ResourceInfo, encode_header, exact};
 
 pub(crate) const NOW: u64 = 1_800_000_000;
-pub(crate) const SELLER: Address = address!("0x209693Bc6afc0C5328bA36FaF03C514EF312287C");
+thread_local! {
+    /// One payee per test thread: the layer refuses two stores for one payee (D-017).
+    static PAYEE: Address = {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        let n = NEXT.fetch_add(1, Ordering::Relaxed);
+        let mut b = [0x20u8; 20];
+        b[12..].copy_from_slice(&n.to_be_bytes());
+        Address::from(b)
+    };
+}
+
+pub(crate) fn seller() -> Address {
+    PAYEE.with(|a| *a)
+}
 
 pub(crate) fn buyer() -> PrivateKeySigner {
     PrivateKeySigner::from_bytes(&B256::repeat_byte(0x11)).unwrap()
@@ -31,7 +44,7 @@ pub(crate) fn offer(network: &str) -> PaymentRequirements {
     exact::usdc_requirements(
         &Caip2::parse(network).unwrap(),
         U256::from(10_000),
-        SELLER,
+        seller(),
         60,
     )
     .unwrap()
@@ -94,7 +107,8 @@ pub(crate) fn paywall(setup: Setup) -> Paywall {
             .unwrap_or_else(|| Arc::new(mock.clone())),
         store.clone(),
         Arc::new(clock.clone()),
-    );
+    )
+    .unwrap();
     let counter = served.clone();
     let status = setup.handler_status;
     let app = Router::new()

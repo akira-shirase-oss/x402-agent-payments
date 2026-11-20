@@ -14,7 +14,7 @@ use axum::routing::get;
 use tokio::net::TcpListener;
 use xpay_facilitator_mock::{Faults, MockFacilitator};
 use xpay_seller::{HttpFacilitator, MemoryNonceStore, PaymentConfig, PaymentLayer};
-use xpay_wallet::{Limits, Policy, Wallet, WalletError};
+use xpay_wallet::{AllowedHost, Limits, Policy, Wallet, WalletError};
 use xpay_x402::clock::SystemClock;
 use xpay_x402::exact::{self, TypedAuthorization};
 use xpay_x402::{Caip2, PaymentRequirements, ResourceInfo, encode_header, reason};
@@ -31,8 +31,17 @@ pub async fn serve(listener: TcpListener, app: Router) {
     }
 }
 
+/// The seller's recipient: `X402_PAY_TO` if set, else [`SELLER`].
+pub fn pay_to() -> anyhow::Result<Address> {
+    match std::env::var("X402_PAY_TO") {
+        Ok(a) => a.trim().parse().context("X402_PAY_TO is not an address"),
+        Err(std::env::VarError::NotPresent) => Ok(SELLER),
+        Err(e) => Err(e).context("X402_PAY_TO"),
+    }
+}
+
 pub fn offer(network: &str) -> anyhow::Result<PaymentRequirements> {
-    exact::usdc_requirements(&Caip2::parse(network)?, U256::from(PRICE), SELLER, 60)
+    exact::usdc_requirements(&Caip2::parse(network)?, U256::from(PRICE), pay_to()?, 60)
         .context("no USDC on that network")
 }
 
@@ -55,7 +64,7 @@ pub fn seller(
         Arc::new(HttpFacilitator::new(facilitator, Duration::from_secs(10))?),
         Arc::new(MemoryNonceStore::new(100_000, Arc::new(SystemClock))),
         Arc::new(SystemClock),
-    );
+    )?;
     Ok(Router::new()
         .route("/paid", get(|| async { "the paid content" }))
         .layer(layer))
@@ -97,7 +106,7 @@ pub async fn run_loop() -> anyhow::Result<Vec<Case>> {
     let address = key.address();
     let signer = Arc::new(key);
     let policy = Policy {
-        allow_hosts: vec![seller_addr.to_string()],
+        allow_hosts: vec![AllowedHost::new(seller_addr.to_string(), vec![pay_to()?])],
         networks: vec![Caip2::parse(Caip2::BASE_SEPOLIA)?],
         max_per_payment: U256::from(PRICE),
         total_cap: U256::from(PRICE * 3),
@@ -169,7 +178,7 @@ pub async fn run_loop() -> anyhow::Result<Vec<Case>> {
     let first = send(replay.clone()).await?;
     let second = send(replay).await?;
     ensure!(
-        first.0 == 200 && second == (402, reason::NONCE_REUSED.to_owned()),
+        first.0 == 200 && second == (409, xpay_seller::layer::ALREADY_SETTLED.to_owned()),
         "replay: {first:?} {second:?}"
     );
     report.push(Case {
@@ -241,7 +250,7 @@ pub async fn run_loop() -> anyhow::Result<Vec<Case>> {
         signer.clone(),
         address,
         Policy {
-            allow_hosts: vec!["127.0.0.2:1".into()],
+            allow_hosts: vec![AllowedHost::new("127.0.0.2:1", vec![SELLER])],
             ..policy.clone()
         },
         Limits::default(),

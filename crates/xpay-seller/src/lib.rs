@@ -12,6 +12,6 @@ pub mod layer;
 pub mod store;
 
 pub use http_facilitator::HttpFacilitator;
-pub use layer::{Paid, PaymentConfig, PaymentLayer, PaymentService, SettleMode};
-pub use store::{Claim, ClaimState, MemoryNonceStore, NonceKey, NonceStore};
+pub use layer::{ConfigError, Paid, PaymentConfig, PaymentLayer, PaymentService, SettleMode};
+pub use store::{Claim, ClaimState, Delivery, MemoryNonceStore, NonceKey, NonceStore};
 pub use xpay_x402::facilitator::{Facilitator, FacilitatorError};
