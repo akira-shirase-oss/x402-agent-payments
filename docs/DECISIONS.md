@@ -232,7 +232,7 @@ against a 64-claim store, with thresholds written before the first run.
   settle-after handler that fails before settlement starts releases its claim.
 - **Clients.** A request without the peer address is refused (500
   `client_address_unavailable`), never served unbounded. Payment slots are bounded per
-  client and per network (IPv4 /24, IPv6 /48); `trusted_proxies` takes addresses or
+  client and per IPv6 /48 (an IPv4 /24 is not one party: NAT); `trusted_proxies` takes addresses or
   ranges, and at most eight forwarded hops are read.
 - **Wallet.** It keeps each sent proof with its URL and resends it (`Wallet::resume`, or
   the next `get` of that URL) instead of paying again; it backs off on `409

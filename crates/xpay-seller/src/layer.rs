@@ -59,7 +59,7 @@ pub struct PaymentConfig {
     pub max_in_flight: usize,
     /// Bound: of those, how many one client (IPv4 address or IPv6 /64) may hold.
     pub max_in_flight_per_client: usize,
-    /// Bound: how many one network (IPv4 /24 or IPv6 /48) may hold, so rotating addresses
+    /// Bound: how many one IPv6 /48 may hold, so rotating addresses
     /// inside one allocation does not multiply a client's share.
     pub max_in_flight_per_network: usize,
     /// Proxies (addresses or CIDR ranges) whose `X-Forwarded-For` hops are believed: the
@@ -915,7 +915,7 @@ async fn settle(
 }
 
 /// Who holds a payment slot: an IPv4 address or an IPv6 /64 (as `xpay_http::client`), and
-/// the network around it: an IPv4 /24 or an IPv6 /48.
+/// the network around it: an IPv6 /48 (an IPv4 address is its own network).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum ClientKey {
     V4(u32),
@@ -928,7 +928,9 @@ fn keys_of(ip: IpAddr) -> [ClientKey; 2] {
     match canonical(ip) {
         IpAddr::V4(v4) => {
             let a = u32::from(v4);
-            [ClientKey::V4(a), ClientKey::Net4(a >> 8)]
+            // An IPv4 network is not one party (NAT, carrier NAT): only IPv6, where one
+            // party holds a /48 of /64s, is bounded by network.
+            [ClientKey::V4(a), ClientKey::Net4(a)]
         }
         IpAddr::V6(v6) => {
             let a = u128::from(v6);
