@@ -30,6 +30,7 @@ enum Then {
 struct Seller {
     port: u16,
     proofs: Arc<AtomicUsize>,
+    seen: Arc<std::sync::Mutex<Vec<String>>>,
 }
 
 async fn seller(pay_to: Address, script: Vec<Then>) -> Seller {
@@ -37,6 +38,8 @@ async fn seller(pay_to: Address, script: Vec<Then>) -> Seller {
     let port = l.local_addr().unwrap().port();
     let proofs = Arc::new(AtomicUsize::new(0));
     let seen = proofs.clone();
+    let texts = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let kept = texts.clone();
     tokio::spawn(async move {
         loop {
             let (mut s, _) = l.accept().await.unwrap();
@@ -51,6 +54,9 @@ async fn seller(pay_to: Address, script: Vec<Then>) -> Seller {
             }
             let text = String::from_utf8_lossy(&buf).to_ascii_lowercase();
             let error = if text.contains("payment-signature:") {
+                if let Some(line) = text.lines().find(|l| l.starts_with("payment-signature:")) {
+                    kept.lock().unwrap().push(line.to_owned());
+                }
                 let n = seen.fetch_add(1, Ordering::SeqCst);
                 match script.get(n).copied().unwrap_or(Then::Refuse("x")) {
                     Then::Hangup => continue,
@@ -59,33 +65,41 @@ async fn seller(pay_to: Address, script: Vec<Then>) -> Seller {
             } else {
                 None
             };
-            let required = PaymentRequired {
-                x402_version: X402_VERSION,
-                error,
-                resource: ResourceInfo {
-                    url: format!("http://127.0.0.1:{port}/paid"),
-                    ..ResourceInfo::default()
-                },
-                accepts: vec![
-                    exact::usdc_requirements(
-                        &Caip2::parse(Caip2::BASE_SEPOLIA).unwrap(),
-                        U256::from(PRICE),
-                        pay_to,
-                        60,
-                    )
-                    .unwrap(),
-                ],
-                extensions: None,
-            };
-            let h = encode_header(&required).unwrap();
-            let resp = format!(
-                "HTTP/1.1 402 Payment Required\r\npayment-required: {h}\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
-            );
+            let resp = answer_402(port, pay_to, error);
             let _ = s.write_all(resp.as_bytes()).await;
             let _ = s.shutdown().await;
         }
     });
-    Seller { port, proofs }
+    Seller {
+        port,
+        proofs,
+        seen: texts,
+    }
+}
+
+fn answer_402(port: u16, pay_to: Address, error: Option<String>) -> String {
+    let required = PaymentRequired {
+        x402_version: X402_VERSION,
+        error,
+        resource: ResourceInfo {
+            url: format!("http://127.0.0.1:{port}/paid"),
+            ..ResourceInfo::default()
+        },
+        accepts: vec![
+            exact::usdc_requirements(
+                &Caip2::parse(Caip2::BASE_SEPOLIA).unwrap(),
+                U256::from(PRICE),
+                pay_to,
+                60,
+            )
+            .unwrap(),
+        ],
+        extensions: None,
+    };
+    let h = encode_header(&required).unwrap();
+    format!(
+        "HTTP/1.1 402 Payment Required\r\npayment-required: {h}\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+    )
 }
 
 fn wallet(allow_hosts: Vec<String>) -> Wallet {
@@ -104,7 +118,11 @@ fn wallet(allow_hosts: Vec<String>) -> Wallet {
             total_cap: U256::from(PRICE * 10),
             max_timeout_seconds: 300,
         },
-        Limits::default(),
+        Limits {
+            retries: 2,
+            backoff: std::time::Duration::from_millis(1),
+            ..Limits::default()
+        },
         Arc::new(ManualClock::at(NOW)),
     )
     .unwrap()
@@ -188,7 +206,11 @@ async fn seller_error_text_is_not_echoed() {
     assert!(!text.contains("script"), "{text}");
 }
 
-struct Chain(Result<bool, String>);
+/// The chain's answer and its finalized block's timestamp.
+struct Chain(Result<bool, String>, u64);
+
+/// A finalized block well past every proof's `validBefore`.
+const LATE: u64 = NOW + 3600;
 
 impl xpay_wallet::AuthorizationState for Chain {
     fn authorization_state<'a>(
@@ -197,9 +219,19 @@ impl xpay_wallet::AuthorizationState for Chain {
         _: Address,
         _: Address,
         _: B256,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<bool, String>> + Send + 'a>>
-    {
-        Box::pin(std::future::ready(self.0.clone()))
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<Output = Result<xpay_wallet::AuthorizationStatus, String>>
+                + Send
+                + 'a,
+        >,
+    > {
+        let status = self.0.clone().map(|used| xpay_wallet::AuthorizationStatus {
+            used,
+            block_number: 1,
+            block_timestamp: self.1,
+        });
+        Box::pin(std::future::ready(status))
     }
 }
 
@@ -218,6 +250,8 @@ fn wallet_at(allow: String, clock: ManualClock, max_unresolved: usize) -> Wallet
         },
         Limits {
             max_unresolved,
+            retries: 2,
+            backoff: std::time::Duration::from_millis(1),
             ..Limits::default()
         },
         Arc::new(clock),
@@ -235,15 +269,15 @@ async fn only_the_chain_releases_a_sent_proof_and_only_once_it_expired_unused() 
     let _ = w.get(&url).await;
     assert_eq!(w.unresolved().len(), 2);
     // Before validBefore (+ margin) nothing is released, whatever the chain says.
-    let r = w.reconcile(&Chain(Ok(false))).await;
+    let r = w.reconcile(&Chain(Ok(false), LATE)).await;
     assert_eq!((r.released, r.waiting), (0, 2));
     clock.advance(60 + xpay_wallet::EXPIRY_MARGIN_SECS + 1);
     // The chain not answering keeps the reservation.
-    let r = w.reconcile(&Chain(Err("down".into()))).await;
+    let r = w.reconcile(&Chain(Err("down".into()), LATE)).await;
     assert_eq!((r.released, r.waiting), (0, 2));
     assert_eq!(w.committed(), U256::from(PRICE * 2));
     // Used on chain: spent, never released.
-    let r = w.reconcile(&Chain(Ok(true))).await;
+    let r = w.reconcile(&Chain(Ok(true), LATE)).await;
     assert_eq!((r.spent, r.released), (2, 0));
     assert_eq!(w.committed(), U256::from(PRICE * 2));
     assert_eq!(w.unresolved().len(), 0);
@@ -258,7 +292,7 @@ async fn an_expired_unused_authorisation_goes_back_to_the_cap() {
     assert!(matches!(r, Err(WalletError::Unsettled(None))), "{r:?}");
     assert_eq!(w.committed(), U256::from(PRICE));
     clock.advance(60 + xpay_wallet::EXPIRY_MARGIN_SECS + 1);
-    let r = w.reconcile(&Chain(Ok(false))).await;
+    let r = w.reconcile(&Chain(Ok(false), LATE)).await;
     assert_eq!(r.released, 1);
     assert_eq!(w.committed(), U256::ZERO);
 }
@@ -277,4 +311,72 @@ async fn unresolved_proofs_are_bounded() {
         "nothing signed past the bound"
     );
     assert_eq!(w.committed(), U256::from(PRICE));
+}
+
+#[tokio::test]
+async fn plain_http_to_localhost_by_name_is_refused() {
+    let s = seller(SELLER, vec![]).await;
+    let w = wallet(vec![format!("localhost:{}", s.port)]);
+    let r = w.get(&format!("http://localhost:{}/paid", s.port)).await;
+    assert!(matches!(r, Err(WalletError::Url)), "{r:?}");
+    assert_eq!(s.proofs.load(Ordering::SeqCst), 0);
+}
+
+/// Answers the unpaid probe with a 402, then stops listening: the proof can never connect.
+async fn seller_then_gone(pay_to: Address) -> u16 {
+    let l = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = l.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        let (mut s, _) = l.accept().await.unwrap();
+        drop(l);
+        let mut buf = Vec::new();
+        let mut chunk = [0u8; 4096];
+        while !buf.windows(4).any(|w| w == b"\r\n\r\n") {
+            let n = s.read(&mut chunk).await.unwrap();
+            if n == 0 {
+                break;
+            }
+            buf.extend_from_slice(&chunk[..n]);
+        }
+        let _ = s.write_all(answer_402(port, pay_to, None).as_bytes()).await;
+        let _ = s.shutdown().await;
+    });
+    port
+}
+
+#[tokio::test]
+async fn a_proof_that_never_connected_gives_the_reservation_back() {
+    let port = seller_then_gone(SELLER).await;
+    let w = wallet(vec![format!("127.0.0.1:{port}")]);
+    let r = w.get(&format!("http://127.0.0.1:{port}/paid")).await;
+    assert!(r.is_err(), "{r:?}");
+    assert_eq!(w.committed(), U256::ZERO, "nothing left the process");
+    assert_eq!(w.unresolved().len(), 0);
+}
+
+#[tokio::test]
+async fn a_local_clock_ahead_of_the_chain_does_not_release() {
+    let s = seller(SELLER, vec![Then::Hangup, Then::Hangup, Then::Hangup]).await;
+    let clock = ManualClock::at(NOW);
+    let w = wallet_at(format!("127.0.0.1:{}", s.port), clock.clone(), 16);
+    let _ = w.get(&format!("http://127.0.0.1:{}/paid", s.port)).await;
+    assert_eq!(w.committed(), U256::from(PRICE));
+    // The local clock runs an hour ahead; the finalized block is still at validBefore.
+    clock.advance(3600);
+    let r = w.reconcile(&Chain(Ok(false), NOW + 60)).await;
+    assert_eq!(r.released, 0, "released on the local clock alone");
+    assert_eq!(w.committed(), U256::from(PRICE));
+}
+
+#[tokio::test]
+async fn paying_again_for_the_same_url_resends_the_live_proof_instead_of_a_new_one() {
+    let s = seller(SELLER, vec![Then::Hangup; 8]).await;
+    let w = wallet_at(format!("127.0.0.1:{}", s.port), ManualClock::at(NOW), 16);
+    let url = format!("http://127.0.0.1:{}/paid", s.port);
+    assert!(w.get(&url).await.is_err());
+    assert!(w.get(&url).await.is_err());
+    let seen = s.seen.lock().unwrap().clone();
+    assert!(seen.len() >= 2, "{seen:?}");
+    assert!(seen.iter().all(|p| *p == seen[0]), "one proof, resent");
+    assert_eq!(w.committed(), U256::from(PRICE), "paid at most once");
 }

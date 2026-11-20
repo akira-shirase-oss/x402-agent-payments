@@ -4957,6 +4957,7 @@ dependencies = [
  "alloy-signer-local",
  "reqwest",
  "rustls",
+ "serde_json",
  "thiserror",
  "tokio",
  "tracing",

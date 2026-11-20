@@ -6,9 +6,16 @@
 //! new one: one 402, at most one payment.
 //!
 //! Once a proof has left the process no answer from the seller releases its reservation:
-//! anyone holding the proof can settle it. The reservation stays [`Unresolved`] until
-//! [`Wallet::reconcile`] sees, on chain, that the authorisation expired unused
-//! (`validBefore` passed and `authorizationState(from, nonce)` is still false).
+//! anyone holding the proof can settle it. The reservation stays [`Unresolved`] (with its
+//! proof, so [`Wallet::resume`] or the next [`Wallet::get`] of that URL resends it instead
+//! of paying again) until [`Wallet::reconcile`] sees, at a finalized block, that the
+//! authorisation expired unused: the block's timestamp is past `validBefore` and
+//! `authorizationState(from, nonce)` is still false. A proof that never connected (no byte
+//! sent) gives its reservation back at once.
+//!
+//! While the seller is still working on a payment (`409 payment_in_flight`, `503`, a
+//! `504 handler_timeout`, or no answer) the wallet backs off and resends the same proof
+//! until `validBefore`.
 
 use std::future::Future;
 use std::net::IpAddr;
@@ -78,8 +85,11 @@ pub struct Limits {
     pub request_timeout: Duration,
     /// Bound: the largest response body read.
     pub max_body_bytes: usize,
-    /// Resends of the same proof after a lost answer or a 5xx.
+    /// Bound: resends of the same proof while its outcome is pending (also bounded by the
+    /// proof's `validBefore`).
     pub retries: u32,
+    /// First wait between resends; it doubles up to [`MAX_BACKOFF`].
+    pub backoff: Duration,
     /// Bound: proofs sent whose outcome is not yet known on chain.
     pub max_unresolved: usize,
 }
@@ -87,9 +97,11 @@ pub struct Limits {
 impl Default for Limits {
     fn default() -> Self {
         Self {
-            request_timeout: Duration::from_secs(30),
+            // Longer than a seller's default verify + settle + handler deadlines (5 + 20 + 30 s).
+            request_timeout: Duration::from_secs(75),
             max_body_bytes: 1024 * 1024,
-            retries: 2,
+            retries: 30,
+            backoff: Duration::from_millis(250),
             max_unresolved: 1024,
         }
     }
@@ -104,6 +116,19 @@ pub struct Receipt {
     pub settlement: Option<SettleResponse>,
 }
 
+/// The longest wait between resends of one proof.
+pub const MAX_BACKOFF: Duration = Duration::from_secs(4);
+
+/// An encoded payment proof: a bearer instrument, so it never prints.
+#[derive(Clone, PartialEq, Eq)]
+pub struct SignedProof(String);
+
+impl std::fmt::Debug for SignedProof {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("SignedProof(..)")
+    }
+}
+
 /// A proof that left the process; its amount stays committed until the chain says.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Unresolved {
@@ -111,11 +136,29 @@ pub struct Unresolved {
     pub asset: Address,
     pub from: Address,
     pub nonce: B256,
+    /// The signed `validBefore`.
     pub valid_before: u64,
     pub amount: U256,
+    /// The URL it pays for.
+    pub url: String,
+    pub proof: SignedProof,
+    /// Its outcome is still pending at the seller (no answer, in flight): resending it may
+    /// still be served. False once the seller refused it.
+    pub resumable: bool,
 }
 
-/// `authorizationState(from, nonce)` on the USDC contract `asset` of `network`.
+/// `authorizationState(from, nonce)` read at one block.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AuthorizationStatus {
+    pub used: bool,
+    pub block_number: u64,
+    /// That block's timestamp: chain time, not this machine's.
+    pub block_timestamp: u64,
+}
+
+/// `authorizationState(from, nonce)` on the USDC contract `asset` of `network`, read at
+/// the `finalized` (or at least `safe`) block tag, never `latest`: a release decided on
+/// it must not be undone by a reorg.
 pub trait AuthorizationState: Send + Sync {
     fn authorization_state<'a>(
         &'a self,
@@ -123,7 +166,7 @@ pub trait AuthorizationState: Send + Sync {
         asset: Address,
         from: Address,
         nonce: B256,
-    ) -> Pin<Box<dyn Future<Output = Result<bool, String>> + Send + 'a>>;
+    ) -> Pin<Box<dyn Future<Output = Result<AuthorizationStatus, String>> + Send + 'a>>;
 }
 
 /// What one [`Wallet::reconcile`] pass did.
@@ -133,7 +176,8 @@ pub struct Reconciled {
     pub released: usize,
     /// Used on chain: the amount stays spent.
     pub spent: usize,
-    /// Not yet expired, or the chain did not answer: still reserved.
+    /// Not yet expired at the chain's finalized block, or the chain did not answer: still
+    /// reserved.
     pub waiting: usize,
 }
 
@@ -167,6 +211,11 @@ pub enum WalletError {
     BodyTooLarge,
     #[error("HTTP: {0}")]
     Http(String),
+    /// No connection was made, so nothing was sent; a payment's reservation went back.
+    #[error("could not connect: {0}")]
+    Connect(String),
+    #[error("no unresolved payment with that nonce, or it can no longer be served")]
+    NotResumable,
 }
 
 pub struct Wallet {
@@ -241,9 +290,9 @@ impl Wallet {
     fn allowed(&self, url: &reqwest::Url) -> Result<&AllowedHost, WalletError> {
         let host = url.host_str().ok_or(WalletError::Url)?.to_ascii_lowercase();
         let bare = host.trim_start_matches('[').trim_end_matches(']');
-        let loopback = bare
-            .parse::<IpAddr>()
-            .map_or(host == "localhost", |ip| ip.is_loopback());
+        // Plain http only to a literal loopback address: a name (even `localhost`) goes
+        // through a resolver this process does not control.
+        let loopback = bare.parse::<IpAddr>().is_ok_and(|ip| ip.is_loopback());
         let default = match url.scheme() {
             "https" => 443,
             "http" if loopback => 80,
@@ -323,7 +372,9 @@ impl Wallet {
     }
 
     /// Releases what expired unused on chain; forgets what was used (it stays spent).
-    /// Entries the chain does not answer for stay reserved.
+    /// Release is decided on chain time alone: the finalized block's timestamp past
+    /// `validBefore` with the authorisation unused. The local clock only skips entries
+    /// that cannot have expired yet. Entries the chain does not answer for stay reserved.
     pub async fn reconcile(&self, chain: &dyn AuthorizationState) -> Reconciled {
         let now = self.clock.now();
         let mut done = Reconciled::default();
@@ -337,14 +388,19 @@ impl Wallet {
                 chain.authorization_state(&u.network, u.asset, u.from, u.nonce),
             )
             .await;
-            let Ok(Ok(used)) = state else {
+            let Ok(Ok(status)) = state else {
                 done.waiting += 1;
                 continue;
             };
+            if !status.used && status.block_timestamp <= u.valid_before {
+                // Still live at the chain's own time: the seller may yet settle it.
+                done.waiting += 1;
+                continue;
+            }
             if !self.forget(u.nonce) {
                 continue;
             }
-            if used {
+            if status.used {
                 done.spent += 1;
             } else {
                 self.release(u.amount);
@@ -376,10 +432,48 @@ impl Wallet {
         Ok(())
     }
 
-    /// GET `url`, paying its 402 if policy allows.
+    /// The live, resumable proof already sent for `url`, if any.
+    fn pending_for(&self, url: &str) -> Option<Unresolved> {
+        let now = self.clock.now();
+        self.unresolved
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .find(|u| u.resumable && u.url == url && now < u.valid_before)
+            .cloned()
+    }
+
+    fn set_resumable(&self, nonce: B256, resumable: bool) {
+        let mut list = self
+            .unresolved
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if let Some(u) = list.iter_mut().find(|u| u.nonce == nonce) {
+            u.resumable = resumable;
+        }
+    }
+
+    /// Resends an [`Unresolved`] proof (same nonce, never a new payment) while it is live.
+    pub async fn resume(&self, nonce: B256) -> Result<Receipt, WalletError> {
+        let now = self.clock.now();
+        let u = self
+            .unresolved()
+            .into_iter()
+            .find(|u| u.nonce == nonce && u.resumable && now < u.valid_before)
+            .ok_or(WalletError::NotResumable)?;
+        let url = reqwest::Url::parse(&u.url).map_err(|_| WalletError::Url)?;
+        self.allowed(&url)?;
+        self.deliver(&url, &u, true).await
+    }
+
+    /// GET `url`, paying its 402 if policy allows. A live proof already sent for `url`
+    /// is resent instead of paying again.
     pub async fn get(&self, url: &str) -> Result<Receipt, WalletError> {
         let url = reqwest::Url::parse(url).map_err(|_| WalletError::Url)?;
         let origin = self.allowed(&url)?;
+        if let Some(u) = self.pending_for(url.as_str()) {
+            return self.deliver(&url, &u, true).await;
+        }
         let (status, headers, body) = self.send(&url, None).await?;
         if status != StatusCode::PAYMENT_REQUIRED {
             return Ok(Receipt {
@@ -398,31 +492,32 @@ impl Wallet {
         self.reserve(amount)?;
         let nonce = B256::random();
         let now = self.clock.now();
-        let pending = Unresolved {
-            network: offer.network.clone(),
-            asset,
-            from: self.address,
+        let proof = exact::pay(
+            self.signer.as_ref(),
+            self.address,
+            offer,
+            Some(required.resource.clone()),
+            now,
             nonce,
-            valid_before: now.saturating_add(offer.max_timeout_seconds),
-            amount,
-        };
-        let proof = self.track(pending).and_then(|()| {
-            exact::pay(
-                self.signer.as_ref(),
-                self.address,
-                offer,
-                Some(required.resource.clone()),
-                now,
+        )
+        .and_then(|p| encode_header(&p).map_err(|e| SignError::Signer(e.to_string())))
+        .map_err(WalletError::from);
+        let pending = proof.and_then(|proof| {
+            let u = Unresolved {
+                network: offer.network.clone(),
+                asset,
+                from: self.address,
                 nonce,
-            )
-            .and_then(|p| encode_header(&p).map_err(|e| SignError::Signer(e.to_string())))
-            .map_err(|e| {
-                self.forget(nonce);
-                e.into()
-            })
+                valid_before: now.saturating_add(offer.max_timeout_seconds),
+                amount,
+                url: url.as_str().to_owned(),
+                proof: SignedProof(proof),
+                resumable: true,
+            };
+            self.track(u.clone()).map(|()| u)
         });
-        let proof = match proof {
-            Ok(p) => p,
+        let pending = match pending {
+            Ok(u) => u,
             Err(e) => {
                 // Nothing left the process: the reservation goes back.
                 self.release(amount);
@@ -430,29 +525,68 @@ impl Wallet {
             }
         };
         tracing::info!(amount = %amount, network = %offer.network, "x402 paying");
+        self.deliver(&url, &pending, false).await
+    }
+
+    /// Sends `u`'s proof until the seller decides, backing off while it is pending.
+    async fn deliver(
+        &self,
+        url: &reqwest::Url,
+        u: &Unresolved,
+        resent: bool,
+    ) -> Result<Receipt, WalletError> {
         let mut last = None;
-        for _ in 0..=self.limits.retries {
-            let (status, headers, body) = match self.send(&url, Some(&proof)).await {
+        let mut wait = self.limits.backoff;
+        // Whether any byte of the proof may have left (a resumed proof already did).
+        let mut sent = resent;
+        let mut connect_error = None;
+        // Each resend waits longer for its answer (a handler slower than the first
+        // deadline is still served), never past what is left of the proof's validity.
+        let mut deadline = self.limits.request_timeout;
+        for attempt in 0..=self.limits.retries {
+            if attempt > 0 {
+                let now = self.clock.now();
+                if now >= u.valid_before {
+                    break;
+                }
+                tokio::time::sleep(wait).await;
+                wait = (wait * 2).min(MAX_BACKOFF);
+                let left = Duration::from_secs(u.valid_before - now);
+                deadline = (deadline * 2).min(left.max(self.limits.request_timeout));
+            }
+            let answer = self.send_within(url, Some(&u.proof.0), deadline).await;
+            let (status, headers, body) = match answer {
                 Ok(r) => r,
-                Err(WalletError::Http(_)) => continue,
+                Err(WalletError::Connect(e)) => {
+                    connect_error = Some(e);
+                    continue;
+                }
+                Err(WalletError::Http(_)) => {
+                    sent = true;
+                    last = None;
+                    continue;
+                }
                 Err(e) => return Err(e),
             };
+            sent = true;
             let settlement: Option<SettleResponse> = headers
                 .get(PAYMENT_RESPONSE_HEADER)
                 .and_then(|h| decode_header(h.as_bytes()).ok());
             if status.is_success() {
-                self.forget(nonce);
+                self.forget(u.nonce);
                 return Ok(Receipt {
                     status: status.as_u16(),
                     body,
-                    paid: Some(amount),
+                    paid: Some(u.amount),
                     settlement,
                 });
             }
             if status == StatusCode::CONFLICT && settlement.as_ref().is_some_and(|s| s.success) {
+                self.set_resumable(u.nonce, false);
                 return Err(WalletError::PaidNotDelivered(settlement.map(Box::new)));
             }
             if status == StatusCode::PAYMENT_REQUIRED {
+                self.set_resumable(u.nonce, false);
                 let why = headers
                     .get(PAYMENT_REQUIRED_HEADER)
                     .and_then(|h| decode_header::<PaymentRequired>(h.as_bytes()).ok())
@@ -460,9 +594,16 @@ impl Wallet {
                 return Err(WalletError::Refused(reason_code(why.as_deref())));
             }
             last = Some(status.as_u16());
-            if status.is_client_error() && status != StatusCode::CONFLICT {
+            if !pending(status, &body) {
+                self.set_resumable(u.nonce, false);
                 break;
             }
+        }
+        if !sent {
+            // No connection was ever made: the proof never left this process.
+            self.forget(u.nonce);
+            self.release(u.amount);
+            return Err(WalletError::Connect(connect_error.unwrap_or_default()));
         }
         Err(WalletError::Unsettled(last))
     }
@@ -472,14 +613,27 @@ impl Wallet {
         url: &reqwest::Url,
         proof: Option<&str>,
     ) -> Result<(StatusCode, reqwest::header::HeaderMap, Vec<u8>), WalletError> {
-        let mut req = self.http.get(url.clone());
+        self.send_within(url, proof, self.limits.request_timeout)
+            .await
+    }
+
+    async fn send_within(
+        &self,
+        url: &reqwest::Url,
+        proof: Option<&str>,
+        deadline: Duration,
+    ) -> Result<(StatusCode, reqwest::header::HeaderMap, Vec<u8>), WalletError> {
+        let mut req = self.http.get(url.clone()).timeout(deadline);
         if let Some(p) = proof {
             req = req.header(PAYMENT_SIGNATURE_HEADER, p);
         }
-        let mut resp = req
-            .send()
-            .await
-            .map_err(|e| WalletError::Http(e.without_url().to_string()))?;
+        let mut resp = req.send().await.map_err(|e| {
+            if e.is_connect() {
+                WalletError::Connect(e.without_url().to_string())
+            } else {
+                WalletError::Http(e.without_url().to_string())
+            }
+        })?;
         let status = resp.status();
         let headers = resp.headers().clone();
         let mut body = Vec::new();
@@ -494,6 +648,21 @@ impl Wallet {
             body.extend_from_slice(&chunk);
         }
         Ok((status, headers, body))
+    }
+}
+
+/// Whether the seller is still working on the payment, so the same proof may be served
+/// later: `409 payment_in_flight`, `503` (busy, or the facilitator unreachable before
+/// anything moved), `504 handler_timeout`. Anything else is the seller's decision.
+fn pending(status: StatusCode, body: &[u8]) -> bool {
+    let error = serde_json::from_slice::<serde_json::Value>(body)
+        .ok()
+        .and_then(|v| v.get("error").and_then(|e| e.as_str()).map(str::to_owned));
+    match status {
+        StatusCode::SERVICE_UNAVAILABLE => true,
+        StatusCode::CONFLICT => error.as_deref() == Some("payment_in_flight"),
+        StatusCode::GATEWAY_TIMEOUT => error.as_deref() == Some("handler_timeout"),
+        _ => false,
     }
 }
 
