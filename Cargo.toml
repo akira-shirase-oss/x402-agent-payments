@@ -23,7 +23,7 @@ xpay-accounts = { path = "crates/xpay-accounts" }
 anyhow = "1.0.104"
 argon2 = { version = "0.5.3", default-features = false, features = ["alloc", "password-hash", "std"] }
 axum = { version = "0.8.9", default-features = false, features = ["http1", "json", "tokio", "query", "matched-path", "original-uri"] }
-getrandom = { version = "0.3.4", features = ["std"] }
+getrandom = { version = "0.4.3", features = ["std"] }
 hex = "0.4.3"
 http-body-util = "0.1.5"
 # Driven directly for the connection bounds (header-read timeout, write stall, request cap,
