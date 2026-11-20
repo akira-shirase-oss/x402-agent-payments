@@ -1,0 +1,79 @@
+# The service's unit (docs/OPERATIONS.md, "Host"), from Service Monitor's
+# deploy/monitor-server.service. Install: /etc/systemd/system/xpay.service.
+#
+# Layout on the droplet (scripts/deploy.sh): /opt/xpay/releases/<release>/bin/, a
+# `current` symlink, /etc/xpay/env (no secrets, 0644) and /etc/xpay/credentials/
+# (root:root, 0600 files, loaded below). The service user owns only its state directory;
+# releases, env and credentials stay root-owned, so it cannot rewrite its own binary,
+# configuration or secrets. `systemd-analyze security xpay.service` is recorded in
+# docs/OPERATIONS.md.
+
+[Unit]
+Description=starter (a copy of the Backend Platform starter template)
+After=network-online.target
+Wants=network-online.target
+# A crash is retried with backoff; ten starts in half an hour gives up (`systemctl
+# reset-failed starter` after fixing the cause).
+StartLimitIntervalSec=1800
+StartLimitBurst=10
+
+[Service]
+Type=simple
+User=xpay
+Group=xpay
+EnvironmentFile=/etc/xpay/env
+# Secrets as systemd credentials: readable by this service only, never in the environment
+# (which `systemctl show` prints). The server reads $CREDENTIALS_DIRECTORY/database-url.
+LoadCredential=database-url:/etc/xpay/credentials/database-url
+ExecStart=/opt/xpay/current/bin/xpay-server
+Restart=on-failure
+RestartSec=5s
+# Back off 5 s → 5 min over 8 steps (systemd ≥ 254; older versions ignore these two).
+RestartSteps=8
+RestartMaxDelaySec=300s
+# 2 configuration, 3 role or protections, 4 schema: a restart cannot fix any of them.
+RestartPreventExitStatus=2 3 4
+# SIGTERM drains (XPAY_DRAIN_TIMEOUT_MS, 15 s); SIGKILL only after this.
+TimeoutStopSec=40s
+UMask=0077
+StateDirectory=xpay
+StateDirectoryMode=0700
+
+# Sized for a 2 GB droplet that also runs Caddy and the MTA: the service stays well under.
+LimitNOFILE=4096
+TasksMax=512
+MemoryHigh=640M
+MemoryMax=768M
+
+# Sandboxing: no capabilities (63350 is unprivileged), no privilege gain, a read-only
+# system, no devices, no kernel or clock changes, sockets only for IP and local use.
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+DevicePolicy=closed
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+ProcSubset=pid
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RemoveIPC=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged
+SystemCallErrorNumber=EPERM
+
+[Install]
+WantedBy=multi-user.target

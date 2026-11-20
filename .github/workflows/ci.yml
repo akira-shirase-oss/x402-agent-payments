@@ -1,0 +1,102 @@
+# The copy's CI. GitHub runs it once this directory is a repository's root: the README's
+# quickstart ending with the gate (scripts/check.sh, the same script developers run), the
+# limit proofs, and the operator guide followed end to end, on every push and pull request,
+# and daily, so a new advisory fails the build without a push.
+name: ci
+
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: "41 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  gate:
+    name: gate (scripts/check.sh)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      # Third-party actions are pinned to commit SHAs (scripts/check-pins.sh).
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the pinned toolchain
+        run: |
+          channel=$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)
+          rustup toolchain install "$channel" --profile minimal --component clippy,rustfmt
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      # A version this install-action release lists with its checksum; no fallback to an
+      # unverified download.
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        with:
+          tool: cargo-deny@0.20.2
+          fallback: none
+      - name: Tools the drills use (age and k6 pinned by checksum)
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q sqlite3
+          scripts/install-age.sh "$RUNNER_TEMP/bin"
+          scripts/install-k6.sh "$RUNNER_TEMP/bin"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      # The README's quickstart, as written; it ends with the gate (scripts/check.sh).
+      - name: The README quickstart, then the gate
+        run: scripts/test-readme.sh
+
+  limits:
+    name: every limit's test fails without the limit (scripts/prove-limits.sh)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the pinned toolchain
+        run: |
+          channel=$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)
+          rustup toolchain install "$channel" --profile minimal --component clippy,rustfmt
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: Database
+        run: scripts/stack.sh up
+      - name: Prove every limit
+        run: |
+          eval "$(scripts/stack.sh env)"
+          scripts/prove-limits.sh
+
+  # The production path, end to end: the operator guide's install, check, upgrade and
+  # rollback blocks run as written on an Ubuntu 24.04 VM with systemd
+  # (scripts/test-install.sh): hardening, env and credentials, the hardened unit,
+  # Caddy with TLS, deploy and rollback.
+  install:
+    name: the operator guide, end to end on Ubuntu 24.04 with systemd
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the pinned toolchain
+        run: |
+          channel=$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)
+          rustup toolchain install "$channel" --profile minimal --component clippy,rustfmt
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: What a fresh droplet has (openssh-server, ufw)
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q openssh-server ufw
+      - name: The release build
+        run: cargo build --release --locked -p xpay-server
+      - name: The database (standing in for Neon)
+        run: scripts/stack.sh up
+      - name: Follow the operator guide
+        run: sudo -E env "PATH=$PATH" scripts/test-install.sh

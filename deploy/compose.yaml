@@ -1,0 +1,32 @@
+# The development and CI database: PostgreSQL 18, the major the protections manifest's
+# digests were taken on. Production uses Neon (docs/OPERATIONS.md); this is never deployed.
+#
+# Its own compose project, bound to 127.0.0.1 only. A copy renames the project and picks
+# its own port (XPAY_PG_PORT). The credentials are public development values.
+#
+# The image is pinned by digest. To upgrade, change the tag, look up the new digest with
+# `docker buildx imagetools inspect postgres:<tag>`, and run scripts/check.sh.
+name: xpay
+
+services:
+  postgres:
+    image: postgres:18.7-trixie@sha256:2ea8630df176ad090ec92136dee850397c5af8781e4bcf2e4162593691c61bbc
+    command: ["postgres", "-c", "max_connections=300"]
+    environment:
+      POSTGRES_USER: xpay
+      POSTGRES_PASSWORD: xpay-admin-dev
+      POSTGRES_DB: xpay
+    ports:
+      - "127.0.0.1:${XPAY_PG_PORT:-63332}:5432"
+    volumes:
+      - postgres:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD", "pg_isready", "--host=127.0.0.1", "--username=starter", "--dbname=starter"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 60s
+      start_interval: 1s
+
+volumes:
+  postgres:

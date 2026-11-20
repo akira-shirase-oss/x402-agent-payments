@@ -1,0 +1,53 @@
+# Caddy in front of the service on one droplet (docs/OPERATIONS.md, "Host").
+#
+# TLS (automatic certificates) and HSTS; request header, body and idle bounds; the
+# upstream only on 127.0.0.1; health routes passed through like every route, so Service
+# Monitor sees what a customer sees. Caddy sets X-Forwarded-For to the client it saw and
+# ignores the client's own (untrusted) value, so with XPAY_TRUSTED_PROXIES=127.0.0.1 the
+# service's budgets key on the real client. Validated by scripts/check-caddy.sh.
+{
+	# Nothing on this host reconfigures Caddy at runtime.
+	admin off
+	servers {
+		timeouts {
+			read_header 10s
+			read_body 30s
+			write 60s
+			idle 2m
+		}
+		max_header_size 32KB
+	}
+}
+
+{$XPAY_DOMAIN} {
+	encode zstd gzip
+	header {
+		Strict-Transport-Security "max-age=63072000; includeSubDomains"
+		X-Content-Type-Options nosniff
+		Referrer-Policy no-referrer
+		-Server
+	}
+	request_body {
+		max_size 1MB
+	}
+	reverse_proxy 127.0.0.1:63350 {
+		transport http {
+			dial_timeout 2s
+			response_header_timeout 30s
+		}
+	}
+	# Access logs to the journal. Verification and reset links carry their token in the
+	# query string, so it is deleted before the line is written; Caddy already redacts
+	# Cookie and Authorization headers.
+	log {
+		output stderr
+		format filter {
+			wrap json
+			fields {
+				request>uri query {
+					delete token
+				}
+			}
+		}
+	}
+}

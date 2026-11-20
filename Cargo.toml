@@ -1,0 +1,76 @@
+# The starter template (B1-T, docs/XPAY_TEMPLATE.md in the Backend Platform repository).
+# A product copies this directory once and owns the copy: nothing here is a shared package,
+# and nothing depends on the repository it came from (docs/COPYING.md).
+[workspace]
+members = ["crates/*"]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+license = "MIT"
+publish = false
+
+[workspace.dependencies]
+xpay-http = { path = "crates/xpay-http" }
+xpay-db = { path = "crates/xpay-db" }
+xpay-accounts = { path = "crates/xpay-accounts" }
+
+# External crates: versions live here only. Minimal features; one async runtime (Tokio). One
+# TLS stack, rustls, and only for the database client: Neon requires TLS. The service itself
+# listens on loopback behind Caddy and mails through a loopback relay.
+anyhow = "1.0.104"
+argon2 = { version = "0.5.3", default-features = false, features = ["alloc", "password-hash", "std"] }
+axum = { version = "0.8.9", default-features = false, features = ["http1", "json", "tokio", "query", "matched-path", "original-uri"] }
+getrandom = { version = "0.3.4", features = ["std"] }
+hex = "0.4.3"
+http-body-util = "0.1.5"
+# Driven directly for the connection bounds (header-read timeout, write stall, request cap,
+# lifetime, connection cap); axum::serve exposes none of them.
+hyper = { version = "1.12", default-features = false, features = ["server", "http1"] }
+hyper-util = { version = "0.1.21", default-features = false, features = ["tokio", "server", "service", "http1"] }
+proptest = "1.12.0"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+sha2 = "0.10.9"
+sqlx = { version = "0.9.0", default-features = false, features = ["runtime-tokio", "tls-rustls-ring-webpki", "postgres", "macros", "migrate", "uuid", "time", "json"] }
+thiserror = "2.0.21"
+time = { version = "0.3.55", default-features = false, features = ["std", "formatting", "serde"] }
+tokio = { version = "1.54", features = ["rt-multi-thread", "macros", "net", "signal", "sync", "time", "io-util"] }
+tokio-util = { version = "0.7.20", default-features = false, features = ["rt"] }
+tower = { version = "0.5.3", features = ["util"] }
+tower-http = { version = "0.7.1", features = ["request-id", "trace", "timeout", "limit", "catch-panic", "sensitive-headers"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
+uuid = { version = "1.29", features = ["v4", "v7", "serde"] }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+unused_must_use = "deny"
+unreachable_pub = "warn"
+rust_2018_idioms = { level = "warn", priority = -1 }
+
+[workspace.lints.clippy]
+all = { level = "deny", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+must_use_candidate = "allow"
+module_name_repetitions = "allow"
+dbg_macro = "deny"
+todo = "deny"
+unimplemented = "deny"
+unwrap_used = "warn"
+expect_used = "warn"
+allow_attributes_without_reason = "deny"
+
+[profile.release]
+debug = "line-tables-only"
+
+# Password hashing is deliberately slow; unoptimized it makes every test that signs in take
+# seconds. Optimize just those crates in development builds.
+[profile.dev.package.argon2]
+opt-level = 3
+[profile.dev.package.blake2]
+opt-level = 3

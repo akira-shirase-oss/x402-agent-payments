@@ -1,0 +1,45 @@
+[package]
+name = "xpay-accounts"
+description = "The copy-and-own accounts kit: invite-gated sign-up, verification, reset, sessions, workspaces, members, tokens, plan limits, deletion."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+# The fake SMTP sink (tests, the upgrade rehearsal's example binary).
+test-support = []
+
+[[example]]
+name = "smtp-sink"
+required-features = ["test-support"]
+
+[dependencies]
+anyhow.workspace = true
+argon2.workspace = true
+axum.workspace = true
+getrandom.workspace = true
+hex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+sqlx.workspace = true
+xpay-db.workspace = true
+xpay-http.workspace = true
+thiserror.workspace = true
+time.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+http-body-util.workspace = true
+proptest.workspace = true
+xpay-accounts = { path = ".", features = ["test-support"] }
+xpay-db = { workspace = true, features = ["test-support"] }
+tokio = { workspace = true, features = ["test-util"] }
+tower.workspace = true
+
+[lints]
+workspace = true

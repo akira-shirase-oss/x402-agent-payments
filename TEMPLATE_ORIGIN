@@ -1,0 +1,7 @@
+# Where this copy came from. Pull later template changes as a reviewed diff
+# (docs/COPYING.md, "Pulling template changes"):
+#   git -C <backend-platform> diff 7fa7e17d9d8fdb47f1ae2d14865bc9e30210b8b2 <newer> -- template/
+template-repository: https://github.com/akira-shirase-oss/backend-platform
+template-commit: 7fa7e17d9d8fdb47f1ae2d14865bc9e30210b8b2
+copied: 2026-11-20
+name: xpay
