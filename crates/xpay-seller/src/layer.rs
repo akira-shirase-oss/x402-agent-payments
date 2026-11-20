@@ -234,7 +234,7 @@ impl PaymentLayer {
                 all.entry(p.clone()).or_insert((id, 0)).1 += 1;
             }
         }
-        let gate = Arc::new(Semaphore::new(config.max_in_flight));
+        let gate = Arc::new(Semaphore::new(config.max_in_flight)); // LIMIT(payment-in-flight)
         let clients = Arc::new(Clients {
             per: config.max_in_flight_per_client,
             held: Mutex::new(HashMap::new()),
@@ -378,14 +378,14 @@ where
     // The permit and the client slot move into the task below and end with it, not with
     // this future: a client that hangs up cannot free them while work is under way.
     let Ok(permit) = Arc::clone(&s.gate).try_acquire_owned() else {
-        return busy(); // LIMIT(in-flight)
+        return busy();
     };
     let client = req
         .extensions()
         .get::<ConnectInfo<SocketAddr>>()
         .map(|ConnectInfo(peer)| client_key(*peer, req.headers(), &s.config.trusted_proxies));
     let Some(slot) = Clients::enter(&s.clients, client) else {
-        return busy(); // LIMIT(per-client)
+        return busy();
     };
     let Ok(asset) = Address::from_str(&offer.asset) else {
         return s.required(StatusCode::PAYMENT_REQUIRED, reason::REQUIREMENTS, None);
@@ -803,6 +803,7 @@ impl Clients {
         };
         let mut held = this.held.lock().unwrap_or_else(PoisonError::into_inner);
         let n = held.entry(key).or_insert(0);
+        // LIMIT(payment-per-client)
         if *n >= this.per {
             return None;
         }
