@@ -8,7 +8,7 @@ tests and evidence.
 |---|---|---|---|---|
 | M0 | — | Base setup from the starter template: CI, gate, port band 63300–63399, drills and evidence kit | CI green on the empty product | **In progress — this base setup** |
 | M1 | 1 | Types, seller layer, buyer client; one paid endpoint on Base Sepolia through the x402.org facilitator | 402 → pay → 200 from a Rust binary; conformance in both directions | **Offline done** (`xpay-x402-loop`, `crates/xpay-seller/tests/seller.rs`, `scripts/check-x402-reference.sh`; D-004–D-016); the live Base Sepolia run (`live_base_sepolia`, needs `X402_TESTNET_KEY`) not yet run |
-| M2 | 2 | Policy service, ledger schema, atomic reservations, nonce claim | Failure cases 1–7; LT-3, LT-4 | Planned |
+| M2 | 2 | Policy service, ledger schema, atomic reservations, nonce claim; the claim guard's clean-up when the runtime shuts down, and a verify-stage panic releasing | Failure cases 1–7; LT-3, LT-4 | Planned |
 | M3 | 3 | Three paid APIs; the demo agent | Agent answers under budget; failure cases 8, 12, 13; LT-1, LT-2 | Planned |
 | M4 | 4 | Watcher, reconciliation, dashboard | Failure cases 14–15; LT-5, LT-6 | Planned |
 | M5 | 5–6 | Pay-per-crawl demo, optional own facilitator, docs site, deploy, UI audit, review | Ship gate checked | Planned |

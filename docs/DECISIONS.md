@@ -201,9 +201,11 @@ instances, or two route layers) could each verify and settle the same authorisat
 pair, and a facilitator may answer success to an identical re-submission. Until M2's
 shared PostgreSQL claim, `PaymentLayer::new` enforces it: a process-wide registry refuses
 a second store for an offer's `payTo` (`ConfigError::PayToTaken`; the same store on
-several routes is fine, and the entry is freed when the last layer is dropped), and with
-`PaymentConfig::lock_dir` set it takes an exclusive file lock per `payTo`, so a second
-process on the host refuses to start (`ConfigError::PayToLocked`). Instances on other hosts
+several routes is fine, and the entry is freed when the last layer is dropped), and it
+takes an exclusive file lock per `payTo` in `PaymentConfig::lock_dir` (on by default:
+`default_lock_dir()`, the service's runtime directory or a private `0700` one; a
+directory others can write is refused), so a second process on the host refuses to start
+(`ConfigError::PayToLocked`). One lock is held per `payTo` for as long as any layer uses it. Instances on other hosts
 cannot be seen from M1: one instance per recipient stays an operator rule until M2. Offers are
 validated against the USDC table at construction (D-007).
 
@@ -212,4 +214,31 @@ validated against the USDC table at construction (D-007).
 `perf/scenarios/x402-paid.md` adds clients that hang up mid-payment, fresh random
 signers flooding from one address, 1 ms of facilitator settle latency, and a phase
 against a 64-claim store, with thresholds written before the first run.
+
+## D-019 — Claims are bound to a resource, decided by hand-over, and never block the store
+
+- **Delivery.** A response the seller hands over is delivered unless it is a 5xx, a
+  handler timeout or a panic: a 3xx, 304 or 4xx counts (the handler ran). Settle-after
+  settles any such response. Only a claim marked not delivered is served again, to the
+  same method and path (`Route`, a hash of both, kept with the claim), at most
+  `MAX_REDELIVERIES` times.
+- **Undecided claims.** Expired held, in-flight and paid-not-delivered claims move to a
+  reconciliation list in claim order. When it is full the oldest entry is dropped with an
+  `x402_dispute` error record and the `dropped()` counter, never blocking new claims;
+  `drain_to_log` writes listed entries to a `DisputeLog` (`FileDisputeLog`: fsynced JSON
+  lines) and removes only what was written. One payer holds at most
+  `MAX_UNDECIDED_PER_PAYER` undecided claims (`429 payer_unresolved_limit`). A
+  settle-after handler that fails before settlement starts releases its claim.
+- **Clients.** A request without the peer address is refused (500
+  `client_address_unavailable`), never served unbounded. Payment slots are bounded per
+  client and per network (IPv4 /24, IPv6 /48); `trusted_proxies` takes addresses or
+  ranges, and at most eight forwarded hops are read.
+- **Wallet.** It keeps each sent proof with its URL and resends it (`Wallet::resume`, or
+  the next `get` of that URL) instead of paying again; it backs off on `409
+  payment_in_flight`, `503` and `504 handler_timeout` until `validBefore`, each resend
+  waiting longer; its default request deadline (75 s) exceeds the seller's verify +
+  settle + handler deadlines. A proof that never connected releases its reservation.
+  Reconciliation releases only when the authorisation is unused at a finalized block
+  whose timestamp is past `validBefore` (`AuthorizationStatus`). Plain http is allowed
+  only to literal loopback addresses, not to names.
 
