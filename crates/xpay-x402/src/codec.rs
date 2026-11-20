@@ -59,7 +59,8 @@ mod tests {
 
     #[test]
     fn refuses_oversized_before_decoding() {
-        let raw = vec![b'A'; MAX_HEADER_BYTES + 1];
+        // The documented bound (8 KiB), spelled out so a raised constant fails here.
+        let raw = vec![b'A'; 8 * 1024 + 1];
         assert_eq!(
             decode_header::<PaymentRequired>(&raw),
             Err(HeaderError::TooLong)
