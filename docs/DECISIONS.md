@@ -243,3 +243,18 @@ against a 64-claim store, with thresholds written before the first run.
   whose timestamp is past `validBefore` (`AuthorizationStatus`). Plain http is allowed
   only to literal loopback addresses, not to names.
 
+
+## D-020 — One live proof per URL; a task that dies after settlement answers handler_timeout
+
+- **Wallet.** While a proof for a URL may still settle (until its `validBefore` plus
+  `EXPIRY_MARGIN_SECS`), `get` of that URL never signs another: it resends that proof
+  when it is resumable, else refuses with `WalletError::PaymentPending { nonce }` (resolve
+  it with `reconcile`). The check runs under the same lock as the push, so two racing
+  gets sign one proof. A 5xx (any 504 included) is not a decision: the proof stays
+  resumable.
+- **Seller.** When a paid request's task dies after `Phase::Settled` (a handler panic),
+  the claim guard records it not delivered and only then answers `504 handler_timeout`, so
+  the resend of the same proof is served. A retry that finds another retry serving the
+  same claim is told `409 payment_in_flight` (`Redelivery::InFlight`), not
+  `payment_not_delivered`. A settle answer that does not name the payer is held
+  (`502 settle_answer_mismatch`).

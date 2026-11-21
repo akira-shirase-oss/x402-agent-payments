@@ -76,7 +76,9 @@ pub enum Redelivery {
     Serve(String),
     /// The payment was made for another resource.
     OtherResource,
-    /// Not waiting for a delivery (in flight, delivered, or out of attempts).
+    /// Another retry took it first and is being served.
+    InFlight,
+    /// Not waiting for a delivery (delivered, or out of attempts).
     No,
 }
 
@@ -472,6 +474,14 @@ impl NonceStore for MemoryNonceStore {
                 let tx = transaction.clone();
                 Redelivery::Serve(tx)
             }
+            Some(Entry {
+                state:
+                    ClaimState::Settled {
+                        delivery: Delivery::Serving,
+                        ..
+                    },
+                ..
+            }) => Redelivery::InFlight,
             _ => Redelivery::No,
         };
         drop(inner);
@@ -624,7 +634,7 @@ mod tests {
         s.settled(key(1), "0xabc".into()).await;
         assert_eq!(
             s.redeliver(key(1), R).await,
-            Redelivery::No,
+            Redelivery::InFlight,
             "still serving"
         );
         s.delivered(key(1), false).await;
@@ -635,7 +645,7 @@ mod tests {
         );
         assert_eq!(
             s.redeliver(key(1), R).await,
-            Redelivery::No,
+            Redelivery::InFlight,
             "one attempt at a time"
         );
         s.delivered(key(1), true).await;
@@ -721,6 +731,21 @@ mod tests {
             "out of attempts"
         );
         assert_eq!(s.held().await, vec![(key(1), PAID_NOT_DELIVERED)]);
+    }
+
+    #[tokio::test]
+    async fn the_losing_retry_of_two_racing_redeliveries_is_told_in_flight() {
+        let s = MemoryNonceStore::new(8, Arc::new(ManualClock::at(100)));
+        assert_eq!(s.claim(key(1), R, 150).await, Claim::Fresh);
+        s.settled(key(1), "0xabc".into()).await;
+        s.delivered(key(1), false).await;
+        assert_eq!(
+            s.redeliver(key(1), R).await,
+            Redelivery::Serve("0xabc".into())
+        );
+        assert_eq!(s.redeliver(key(1), R).await, Redelivery::InFlight);
+        s.delivered(key(1), true).await;
+        assert_eq!(s.redeliver(key(1), R).await, Redelivery::No);
     }
 
     struct Log(std::sync::Mutex<Vec<Listed>>, bool);

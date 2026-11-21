@@ -283,15 +283,28 @@ pub async fn run_loop() -> anyhow::Result<Vec<Case>> {
         "settle timeout: reservation released"
     );
     mock.set_faults(Faults::default());
-    // Total cap: 3 x price, of which 2 are committed (paid + held); one more fits, then none.
-    ensure!(wallet.get(&url).await?.status == 200, "after the timeout");
+    // The held payment may still settle: the next get of that URL resends the same proof
+    // and signs nothing new.
+    match wallet.get(&url).await {
+        Err(WalletError::Unsettled(Some(504))) => {}
+        other => bail!("after the timeout: {other:?}"),
+    }
     ensure!(
-        matches!(wallet.get(&url).await, Err(WalletError::OverTotalCap)),
+        wallet.committed() == before + U256::from(PRICE),
+        "after the timeout: a second payment for one URL"
+    );
+    // Total cap: 3 x price, of which 2 are committed (paid + held); one more fits, then none.
+    let other = format!("{url}?again");
+    ensure!(wallet.get(&other).await?.status == 200, "another URL");
+    let third = format!("{url}?third");
+    ensure!(
+        matches!(wallet.get(&third).await, Err(WalletError::OverTotalCap)),
         "total cap"
     );
     report.push(Case {
         name: "facilitator timeout during settle",
-        detail: "504, claim held, reservation kept; total cap then refuses".into(),
+        detail: "504, claim held, reservation kept, resent not re-paid; total cap then refuses"
+            .into(),
     });
     Ok(report)
 }

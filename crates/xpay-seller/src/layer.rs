@@ -460,6 +460,8 @@ pub const IN_FLIGHT: &str = "payment_in_flight";
 pub const OTHER_RESOURCE: &str = "payment_for_another_resource";
 /// A payment that was not delivered and is out of attempts: for a dispute.
 pub const NOT_DELIVERED: &str = "payment_not_delivered";
+/// Paid, but the handler did not finish: a retry of the same proof is served again.
+pub const HANDLER_TIMEOUT: &str = "handler_timeout";
 
 /// The resource a request is for: its method and path (not the query).
 fn route_of(req: &Request<Body>) -> Route {
@@ -551,6 +553,7 @@ where
             Redelivery::OtherResource => {
                 return error(StatusCode::CONFLICT, OTHER_RESOURCE);
             }
+            Redelivery::InFlight => return error(StatusCode::CONFLICT, IN_FLIGHT),
             Redelivery::No => return error(StatusCode::CONFLICT, NOT_DELIVERED),
         },
         Claim::Taken(ClaimState::Settled {
@@ -588,6 +591,7 @@ where
             } else {
                 Phase::Claimed
             },
+            reply: Some(tx),
         },
         shared: Arc::clone(&shared),
         request: FacilitatorRequest {
@@ -597,12 +601,12 @@ where
         },
         checked,
         req,
-        reply: tx,
         _permit: permit,
         _slot: slot,
     };
     tokio::spawn(job.run(inner, redeliver));
-    // If the task died, its guard already recorded the claim's fate.
+    // A task that died answers through its guard once the claim's fate is recorded; with
+    // no runtime left to record it, nothing answers.
     rx.await
         .unwrap_or_else(|_| error(StatusCode::INTERNAL_SERVER_ERROR, reason::SETTLE_ERROR))
 }
@@ -639,11 +643,13 @@ enum Phase {
 
 /// Records a claim's fate if its task ends without doing so (a panic in the handler or a
 /// facilitator client): before settle it is released, during settle it holds, a settled
-/// payment is not delivered.
+/// payment is not delivered. Then it answers: a settled payment `504 handler_timeout`
+/// (the buyer resends the same proof and is served), anything else `500`.
 struct ClaimGuard {
     store: Arc<dyn NonceStore>,
     key: NonceKey,
     phase: Phase,
+    reply: Option<oneshot::Sender<Response>>,
 }
 
 impl Drop for ClaimGuard {
@@ -652,13 +658,26 @@ impl Drop for ClaimGuard {
         if phase == Phase::Done {
             return;
         }
+        let reply = self.reply.take();
         tracing::warn!(payer = %key.payer, "x402 payment task ended early: claim recorded");
         if let Ok(rt) = tokio::runtime::Handle::try_current() {
             rt.spawn(async move {
-                match phase {
-                    Phase::Claimed => store.release(key).await,
-                    Phase::Settling => store.hold(key, reason::SETTLE_ERROR).await,
-                    Phase::Settled | Phase::Done => store.delivered(key, false).await,
+                let resp = match phase {
+                    Phase::Claimed => {
+                        store.release(key).await;
+                        error(StatusCode::INTERNAL_SERVER_ERROR, reason::SETTLE_ERROR)
+                    }
+                    Phase::Settling => {
+                        store.hold(key, reason::SETTLE_ERROR).await;
+                        error(StatusCode::INTERNAL_SERVER_ERROR, reason::SETTLE_ERROR)
+                    }
+                    Phase::Settled | Phase::Done => {
+                        store.delivered(key, false).await;
+                        error(StatusCode::GATEWAY_TIMEOUT, HANDLER_TIMEOUT)
+                    }
+                };
+                if let Some(reply) = reply {
+                    let _ = reply.send(resp);
                 }
             });
         }
@@ -674,7 +693,6 @@ struct Job {
     request: FacilitatorRequest,
     checked: exact::Verified,
     req: Request<Body>,
-    reply: oneshot::Sender<Response>,
     _permit: OwnedSemaphorePermit,
     _slot: ClientSlot,
 }
@@ -682,7 +700,17 @@ struct Job {
 impl Job {
     fn end(mut self, resp: Response) {
         self.guard.phase = Phase::Done;
-        let _ = self.reply.send(resp);
+        if let Some(reply) = self.guard.reply.take() {
+            let _ = reply.send(resp);
+        }
+    }
+
+    /// Whether the buyer stopped waiting for the answer.
+    fn gone(&self) -> bool {
+        self.guard
+            .reply
+            .as_ref()
+            .is_none_or(oneshot::Sender::is_closed)
     }
 
     async fn run<S>(mut self, inner: S, redeliver: Option<String>)
@@ -720,7 +748,7 @@ impl Job {
             }
         };
         if let Some(s) = settled {
-            if self.reply.is_closed() {
+            if self.gone() {
                 // Paid, nobody to serve: a retry of the same proof is served then.
                 store.delivered(key, false).await;
                 self.guard.phase = Phase::Done;
@@ -732,7 +760,7 @@ impl Job {
                 .await;
         }
         // Settle-after: nothing has moved yet.
-        if self.reply.is_closed() {
+        if self.gone() {
             store.release(key).await;
             self.guard.phase = Phase::Done;
             return;
@@ -744,7 +772,7 @@ impl Job {
             other => {
                 store.release(key).await;
                 let resp =
-                    other.unwrap_or_else(|| error(StatusCode::GATEWAY_TIMEOUT, "handler_timeout"));
+                    other.unwrap_or_else(|| error(StatusCode::GATEWAY_TIMEOUT, HANDLER_TIMEOUT));
                 return self.end(resp);
             }
         };
@@ -783,11 +811,14 @@ impl Job {
     /// or failed with a 5xx: only then is a retry of the same proof served again.
     async fn deliver(mut self, resp: Option<Response>) {
         let ok = resp.as_ref().is_some_and(|r| !r.status().is_server_error());
-        let resp = resp.unwrap_or_else(|| error(StatusCode::GATEWAY_TIMEOUT, "handler_timeout"));
+        let resp = resp.unwrap_or_else(|| error(StatusCode::GATEWAY_TIMEOUT, HANDLER_TIMEOUT));
         let (store, key) = (Arc::clone(&self.shared.store), self.guard.key);
         self.guard.phase = Phase::Done;
-        let (reply, _) = oneshot::channel();
-        let sent = std::mem::replace(&mut self.reply, reply).send(resp).is_ok();
+        let sent = self
+            .guard
+            .reply
+            .take()
+            .is_some_and(|reply| reply.send(resp).is_ok());
         store.delivered(key, ok && sent).await;
         if !(ok && sent) {
             tracing::warn!(payer = %key.payer, "x402 paid but not delivered: a retry is served");
@@ -874,9 +905,8 @@ async fn settle(
         Ok(Ok(s)) if s.success => {
             let matches = s.network == request.payment_requirements.network
                 && is_tx_hash(&s.transaction)
-                && s.payer
-                    .as_deref()
-                    .is_none_or(|p| same_address(p, key.payer))
+                // LIMIT(settle-names-the-payer)
+                && s.payer.as_deref().is_some_and(|p| same_address(p, key.payer))
                 && s.amount
                     .as_deref()
                     .is_none_or(|a| a == checked.value.to_string());

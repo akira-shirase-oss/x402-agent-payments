@@ -25,6 +25,8 @@ enum Then {
     Hangup,
     /// 402 with `error`.
     Refuse(&'static str),
+    /// This status with a JSON body `{"error": ..}`.
+    Answer(u16, &'static str),
 }
 
 struct Seller {
@@ -53,6 +55,7 @@ async fn seller(pay_to: Address, script: Vec<Then>) -> Seller {
                 buf.extend_from_slice(&chunk[..n]);
             }
             let text = String::from_utf8_lossy(&buf).to_ascii_lowercase();
+            let mut answer = None;
             let error = if text.contains("payment-signature:") {
                 if let Some(line) = text.lines().find(|l| l.starts_with("payment-signature:")) {
                     kept.lock().unwrap().push(line.to_owned());
@@ -61,11 +64,15 @@ async fn seller(pay_to: Address, script: Vec<Then>) -> Seller {
                 match script.get(n).copied().unwrap_or(Then::Refuse("x")) {
                     Then::Hangup => continue,
                     Then::Refuse(e) => Some(e.to_owned()),
+                    Then::Answer(status, e) => {
+                        answer = Some(answer_error(status, e));
+                        None
+                    }
                 }
             } else {
                 None
             };
-            let resp = answer_402(port, pay_to, error);
+            let resp = answer.unwrap_or_else(|| answer_402(port, pay_to, error));
             let _ = s.write_all(resp.as_bytes()).await;
             let _ = s.shutdown().await;
         }
@@ -100,6 +107,18 @@ fn answer_402(port: u16, pay_to: Address, error: Option<String>) -> String {
     format!(
         "HTTP/1.1 402 Payment Required\r\npayment-required: {h}\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
     )
+}
+
+fn answer_error(status: u16, error: &str) -> String {
+    let body = format!("{{\"error\":\"{error}\"}}");
+    format!(
+        "HTTP/1.1 {status} Error\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+        body.len()
+    )
+}
+
+fn distinct(seen: &[String]) -> usize {
+    seen.iter().collect::<std::collections::BTreeSet<_>>().len()
 }
 
 fn wallet(allow_hosts: Vec<String>) -> Wallet {
@@ -150,14 +169,24 @@ async fn a_lost_answer_then_a_402_on_resend_keeps_the_reservation() {
 }
 
 #[tokio::test]
-async fn any_402_after_the_proof_left_keeps_the_reservation() {
+async fn any_402_after_the_proof_left_keeps_the_reservation_and_signs_nothing_new() {
     let s = seller(SELLER, vec![Then::Refuse("insufficient_funds")]).await;
     let w = wallet(vec![format!("127.0.0.1:{}", s.port)]);
-    for _ in 0..3 {
-        let _ = w.get(&format!("http://127.0.0.1:{}/paid", s.port)).await;
+    let url = format!("http://127.0.0.1:{}/paid", s.port);
+    let first = w.get(&url).await;
+    assert!(matches!(first, Err(WalletError::Refused(_))), "{first:?}");
+    let nonce = w.unresolved()[0].nonce;
+    // The refused proof may still settle elsewhere until it expires: no second payment.
+    for _ in 0..2 {
+        let r = w.get(&url).await;
+        assert!(
+            matches!(r, Err(WalletError::PaymentPending { nonce: n }) if n == nonce),
+            "{r:?}"
+        );
     }
-    assert_eq!(s.proofs.load(Ordering::SeqCst), 3);
-    assert_eq!(w.committed(), U256::from(PRICE * 3));
+    assert_eq!(s.proofs.load(Ordering::SeqCst), 1);
+    assert_eq!(w.committed(), U256::from(PRICE));
+    assert_eq!(w.unresolved().len(), 1);
 }
 
 #[tokio::test]
@@ -264,9 +293,8 @@ async fn only_the_chain_releases_a_sent_proof_and_only_once_it_expired_unused() 
     let s = seller(SELLER, vec![Then::Refuse("x"), Then::Refuse("x")]).await;
     let clock = ManualClock::at(NOW);
     let w = wallet_at(format!("127.0.0.1:{}", s.port), clock.clone(), 16);
-    let url = format!("http://127.0.0.1:{}/paid", s.port);
-    let _ = w.get(&url).await;
-    let _ = w.get(&url).await;
+    let _ = w.get(&format!("http://127.0.0.1:{}/paid", s.port)).await;
+    let _ = w.get(&format!("http://127.0.0.1:{}/other", s.port)).await;
     assert_eq!(w.unresolved().len(), 2);
     // Before validBefore (+ margin) nothing is released, whatever the chain says.
     let r = w.reconcile(&Chain(Ok(false), LATE)).await;
@@ -301,9 +329,8 @@ async fn an_expired_unused_authorisation_goes_back_to_the_cap() {
 async fn unresolved_proofs_are_bounded() {
     let s = seller(SELLER, vec![Then::Refuse("x")]).await;
     let w = wallet_at(format!("127.0.0.1:{}", s.port), ManualClock::at(NOW), 1);
-    let url = format!("http://127.0.0.1:{}/paid", s.port);
-    let _ = w.get(&url).await;
-    let r = w.get(&url).await;
+    let _ = w.get(&format!("http://127.0.0.1:{}/paid", s.port)).await;
+    let r = w.get(&format!("http://127.0.0.1:{}/other", s.port)).await;
     assert!(matches!(r, Err(WalletError::TooManyUnresolved)), "{r:?}");
     assert_eq!(
         s.proofs.load(Ordering::SeqCst),
@@ -379,4 +406,96 @@ async fn paying_again_for_the_same_url_resends_the_live_proof_instead_of_a_new_o
     assert!(seen.len() >= 2, "{seen:?}");
     assert!(seen.iter().all(|p| *p == seen[0]), "one proof, resent");
     assert_eq!(w.committed(), U256::from(PRICE), "paid at most once");
+}
+
+#[tokio::test]
+async fn a_504_settle_timeout_keeps_the_proof_and_a_second_get_signs_nothing_new() {
+    let s = seller(SELLER, vec![Then::Answer(504, "settle_timeout"); 8]).await;
+    let w = wallet(vec![format!("127.0.0.1:{}", s.port)]);
+    let url = format!("http://127.0.0.1:{}/paid", s.port);
+    let first = w.get(&url).await;
+    assert!(
+        matches!(first, Err(WalletError::Unsettled(Some(504)))),
+        "{first:?}"
+    );
+    let second = w.get(&url).await;
+    assert!(
+        matches!(second, Err(WalletError::Unsettled(Some(504)))),
+        "the same proof is resent: {second:?}"
+    );
+    let seen = s.seen.lock().unwrap().clone();
+    assert_eq!(seen.len(), 2, "one send per get: {seen:?}");
+    assert_eq!(distinct(&seen), 1, "one proof, resent");
+    assert_eq!(w.committed(), U256::from(PRICE), "paid at most once");
+    assert!(w.unresolved()[0].resumable);
+}
+
+#[tokio::test]
+async fn a_5xx_after_the_proof_left_keeps_it_resumable() {
+    for (status, error) in [
+        (500, "unexpected_settle_error"),
+        (502, "settle_answer_mismatch"),
+        (504, "settlement_pending"),
+    ] {
+        let s = seller(SELLER, vec![Then::Answer(status, error); 4]).await;
+        let w = wallet(vec![format!("127.0.0.1:{}", s.port)]);
+        let url = format!("http://127.0.0.1:{}/paid", s.port);
+        let _ = w.get(&url).await;
+        let _ = w.get(&url).await;
+        let seen = s.seen.lock().unwrap().clone();
+        assert_eq!(distinct(&seen), 1, "{status}: {seen:?}");
+        assert_eq!(w.committed(), U256::from(PRICE), "{status}");
+        assert!(w.unresolved()[0].resumable, "{status}");
+    }
+}
+
+#[tokio::test]
+async fn a_409_the_seller_will_not_serve_stops_resends_and_signs_nothing_new() {
+    let s = seller(SELLER, vec![Then::Answer(409, "payment_not_delivered"); 4]).await;
+    let w = wallet(vec![format!("127.0.0.1:{}", s.port)]);
+    let url = format!("http://127.0.0.1:{}/paid", s.port);
+    let first = w.get(&url).await;
+    assert!(
+        matches!(first, Err(WalletError::Unsettled(Some(409)))),
+        "{first:?}"
+    );
+    let second = w.get(&url).await;
+    assert!(
+        matches!(second, Err(WalletError::PaymentPending { .. })),
+        "{second:?}"
+    );
+    assert_eq!(s.proofs.load(Ordering::SeqCst), 1);
+    assert_eq!(w.committed(), U256::from(PRICE));
+}
+
+#[tokio::test]
+async fn two_racing_gets_of_one_url_sign_one_proof() {
+    let s = seller(SELLER, vec![Then::Hangup; 16]).await;
+    let w = wallet(vec![format!("127.0.0.1:{}", s.port)]);
+    let url = format!("http://127.0.0.1:{}/paid", s.port);
+    let (a, b) = tokio::join!(w.get(&url), w.get(&url));
+    assert!(a.is_err() && b.is_err(), "{a:?} {b:?}");
+    let seen = s.seen.lock().unwrap().clone();
+    assert_eq!(distinct(&seen), 1, "{seen:?}");
+    assert_eq!(w.committed(), U256::from(PRICE));
+    assert_eq!(w.unresolved().len(), 1);
+}
+
+#[tokio::test]
+async fn a_new_proof_is_signed_only_after_the_last_may_no_longer_settle() {
+    let s = seller(SELLER, vec![Then::Refuse("insufficient_funds"); 2]).await;
+    let clock = ManualClock::at(NOW);
+    let w = wallet_at(format!("127.0.0.1:{}", s.port), clock.clone(), 16);
+    let url = format!("http://127.0.0.1:{}/paid", s.port);
+    let _ = w.get(&url).await;
+    clock.advance(60 + xpay_wallet::EXPIRY_MARGIN_SECS);
+    let r = w.get(&url).await;
+    assert!(
+        matches!(r, Err(WalletError::PaymentPending { .. })),
+        "{r:?}"
+    );
+    clock.advance(1);
+    let r = w.get(&url).await;
+    assert!(matches!(r, Err(WalletError::Refused(_))), "{r:?}");
+    assert_eq!(s.proofs.load(Ordering::SeqCst), 2);
 }

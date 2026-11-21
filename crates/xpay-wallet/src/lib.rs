@@ -15,7 +15,9 @@
 //!
 //! While the seller is still working on a payment (`409 payment_in_flight`, `503`, a
 //! `504 handler_timeout`, or no answer) the wallet backs off and resends the same proof
-//! until `validBefore`.
+//! until `validBefore`. A `5xx` or `504` the wallet does not wait out leaves the proof
+//! resumable (the payment may still settle), and while any proof for a URL may still
+//! settle, [`Wallet::get`] of that URL never signs another ([`WalletError::PaymentPending`]).
 
 use std::future::Future;
 use std::net::IpAddr;
@@ -142,8 +144,8 @@ pub struct Unresolved {
     /// The URL it pays for.
     pub url: String,
     pub proof: SignedProof,
-    /// Its outcome is still pending at the seller (no answer, in flight): resending it may
-    /// still be served. False once the seller refused it.
+    /// Resending it may still be served: no answer, still in flight, or a `5xx`/`504`.
+    /// False once the seller decided (a `402`, a `409` it will not serve, another `4xx`).
     pub resumable: bool,
 }
 
@@ -216,6 +218,10 @@ pub enum WalletError {
     Connect(String),
     #[error("no unresolved payment with that nonce, or it can no longer be served")]
     NotResumable,
+    /// A proof already sent for this URL may still settle and the seller will not serve it
+    /// again: nothing new is signed until [`Wallet::reconcile`] decides it.
+    #[error("a payment for this URL may still settle; reconcile it first")]
+    PaymentPending { nonce: B256 },
 }
 
 pub struct Wallet {
@@ -421,10 +427,15 @@ impl Wallet {
     }
 
     fn track(&self, u: Unresolved) -> Result<(), WalletError> {
+        let now = self.clock.now();
         let mut list = self
             .unresolved
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
+        // Checked under the same lock as the push: two racing gets of one URL sign one proof.
+        if let Some(live) = list.iter().find(|p| may_settle(p, &u.url, now)) {
+            return Err(WalletError::PaymentPending { nonce: live.nonce });
+        }
         if list.len() >= self.limits.max_unresolved {
             return Err(WalletError::TooManyUnresolved);
         }
@@ -432,15 +443,24 @@ impl Wallet {
         Ok(())
     }
 
-    /// The live, resumable proof already sent for `url`, if any.
-    fn pending_for(&self, url: &str) -> Option<Unresolved> {
+    /// The live, resumable proof already sent for `url`; else the nonce of one that may
+    /// still settle but will not be served.
+    fn pending_for(&self, url: &str) -> Result<Option<Unresolved>, WalletError> {
         let now = self.clock.now();
-        self.unresolved
+        let list = self
+            .unresolved
             .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+            .unwrap_or_else(PoisonError::into_inner);
+        if let Some(u) = list
             .iter()
             .find(|u| u.resumable && u.url == url && now < u.valid_before)
-            .cloned()
+        {
+            return Ok(Some(u.clone()));
+        }
+        match list.iter().find(|u| may_settle(u, url, now)) {
+            Some(u) => Err(WalletError::PaymentPending { nonce: u.nonce }),
+            None => Ok(None),
+        }
     }
 
     fn set_resumable(&self, nonce: B256, resumable: bool) {
@@ -467,11 +487,12 @@ impl Wallet {
     }
 
     /// GET `url`, paying its 402 if policy allows. A live proof already sent for `url`
-    /// is resent instead of paying again.
+    /// is resent instead of paying again; one that may still settle but will not be
+    /// served refuses with [`WalletError::PaymentPending`].
     pub async fn get(&self, url: &str) -> Result<Receipt, WalletError> {
         let url = reqwest::Url::parse(url).map_err(|_| WalletError::Url)?;
         let origin = self.allowed(&url)?;
-        if let Some(u) = self.pending_for(url.as_str()) {
+        if let Some(u) = self.pending_for(url.as_str())? {
             return self.deliver(&url, &u, true).await;
         }
         let (status, headers, body) = self.send(&url, None).await?;
@@ -595,7 +616,12 @@ impl Wallet {
             }
             last = Some(status.as_u16());
             if !pending(status, &body) {
-                self.set_resumable(u.nonce, false);
+                // A 5xx (a 504 included) is not a decision: the payment may still settle,
+                // so the proof stays resumable and nothing new is signed for this URL.
+                // LIMIT(resumable-on-server-error)
+                if !status.is_server_error() {
+                    self.set_resumable(u.nonce, false);
+                }
                 break;
             }
         }
@@ -649,6 +675,13 @@ impl Wallet {
         }
         Ok((status, headers, body))
     }
+}
+
+/// Whether `u`, a proof for `url`, may still settle: until `validBefore` plus the margin
+/// for clocks behind the chain (as [`Wallet::reconcile`]).
+fn may_settle(u: &Unresolved, url: &str, now: u64) -> bool {
+    // LIMIT(one-payment-per-url)
+    u.url == url && now <= u.valid_before.saturating_add(EXPIRY_MARGIN_SECS)
 }
 
 /// Whether the seller is still working on the payment, so the same proof may be served

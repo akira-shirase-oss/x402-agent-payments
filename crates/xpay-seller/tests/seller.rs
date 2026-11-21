@@ -526,7 +526,7 @@ impl xpay_seller::Facilitator for AlwaysYes {
                 success: true,
                 error_reason: None,
                 error_message: None,
-                payer: None,
+                payer: Some(buyer().address().to_checksum(None)),
                 transaction: format!("0x{}", "ab".repeat(32)),
                 network: req.payment_requirements.network,
                 amount: None,
@@ -560,4 +560,67 @@ async fn the_claim_alone_stops_replays_when_the_facilitator_always_says_yes() {
         (StatusCode::CONFLICT, xpay_seller::layer::ALREADY_SETTLED)
     );
     assert_eq!(w.served.load(Ordering::SeqCst), 1);
+}
+
+/// Says yes to everything and settles, but names no payer.
+struct NamesNoPayer;
+
+impl xpay_seller::Facilitator for NamesNoPayer {
+    fn verify(
+        &self,
+        _: xpay_x402::FacilitatorRequest,
+    ) -> xpay_x402::facilitator::BoxFuture<
+        '_,
+        Result<xpay_x402::VerifyResponse, xpay_seller::FacilitatorError>,
+    > {
+        Box::pin(async {
+            Ok(xpay_x402::VerifyResponse {
+                is_valid: true,
+                invalid_reason: None,
+                invalid_message: None,
+                payer: None,
+                extensions: None,
+            })
+        })
+    }
+
+    fn settle(
+        &self,
+        req: xpay_x402::FacilitatorRequest,
+    ) -> xpay_x402::facilitator::BoxFuture<'_, Result<SettleResponse, xpay_seller::FacilitatorError>>
+    {
+        Box::pin(async move {
+            Ok(SettleResponse {
+                success: true,
+                error_reason: None,
+                error_message: None,
+                payer: None,
+                transaction: format!("0x{}", "ab".repeat(32)),
+                network: req.payment_requirements.network,
+                amount: None,
+                extensions: None,
+            })
+        })
+    }
+}
+
+#[tokio::test]
+async fn a_settle_answer_that_names_no_payer_is_held_and_never_served() {
+    let w = paywall(Setup {
+        facilitator: Some(std::sync::Arc::new(NamesNoPayer)),
+        ..Setup::default()
+    });
+    let p = pay(&offer(Caip2::BASE_SEPOLIA), 20);
+    let a = get_paid(&w.app, Some(&header(&p))).await;
+    assert_eq!(
+        (a.status, error_of(&a)),
+        (StatusCode::BAD_GATEWAY, xpay_seller::layer::SETTLE_MISMATCH)
+    );
+    assert_eq!(
+        w.store.state(&key_of(&p)),
+        Some(ClaimState::Held {
+            reason: xpay_seller::layer::SETTLE_MISMATCH
+        })
+    );
+    assert_eq!(w.served.load(Ordering::SeqCst), 0);
 }

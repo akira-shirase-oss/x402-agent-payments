@@ -197,3 +197,70 @@ async fn a_settle_after_handler_that_panics_releases_the_claim() {
     assert!(released, "claim kept: {:?}", store.state(&k));
     assert_eq!(mock.settled_count(), 0);
 }
+
+#[tokio::test]
+async fn a_handler_that_panics_after_settlement_answers_handler_timeout_and_the_resend_is_served() {
+    let clock = ManualClock::at(NOW);
+    let store = Arc::new(MemoryNonceStore::new(64, Arc::new(clock.clone())));
+    let mock = MockFacilitator::new(Arc::new(clock.clone()));
+    let layer = PaymentLayer::new(
+        unlocked(PaymentConfig::new(
+            ResourceInfo::default(),
+            vec![offer(Caip2::BASE_SEPOLIA)],
+        )),
+        Arc::new(mock.clone()),
+        store.clone(),
+        Arc::new(clock),
+    )
+    .unwrap();
+    let runs = Arc::new(AtomicUsize::new(0));
+    let counter = runs.clone();
+    let app = Router::new()
+        .route(
+            "/a",
+            get(move || async move {
+                let n = counter.fetch_add(1, Ordering::SeqCst);
+                assert!(n > 0, "handler bug on the first run");
+                "served"
+            }),
+        )
+        .layer(layer);
+    let h = header(&pay(&offer(Caip2::BASE_SEPOLIA), 87));
+    let k = xpay_seller::NonceKey {
+        asset: offer(Caip2::BASE_SEPOLIA).asset.parse().unwrap(),
+        payer: buyer().address(),
+        nonce: alloy_primitives::B256::repeat_byte(87),
+    };
+    let mut req = Request::get("/a")
+        .header("payment-signature", &h)
+        .body(Body::empty())
+        .unwrap();
+    req.extensions_mut()
+        .insert(axum::extract::ConnectInfo(std::net::SocketAddr::from((
+            [203, 0, 113, 1],
+            1000,
+        ))));
+    let first = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(first.status(), StatusCode::GATEWAY_TIMEOUT);
+    let bytes = http_body_util::BodyExt::collect(first.into_body())
+        .await
+        .unwrap()
+        .to_bytes();
+    let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(body["error"], xpay_seller::layer::HANDLER_TIMEOUT);
+    // The fate is recorded before the answer: a resend at once finds it.
+    assert!(
+        matches!(
+            store.state(&k),
+            Some(ClaimState::Settled {
+                delivery: xpay_seller::store::Delivery::NotDelivered,
+                ..
+            })
+        ),
+        "{:?}",
+        store.state(&k)
+    );
+    assert_eq!(get_at(&app, "/a", &h).await, StatusCode::OK);
+    assert_eq!(mock.settled_count(), 1, "one settlement");
+    assert_eq!(runs.load(Ordering::SeqCst), 2);
+}
