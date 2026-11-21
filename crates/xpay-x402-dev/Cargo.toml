@@ -1,0 +1,25 @@
+[package]
+name = "xpay-x402-dev"
+description = "Development binaries for x402: the mock facilitator, and the offline 402 -> pay -> 200 loop."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+alloy-primitives.workspace = true
+alloy-signer-local.workspace = true
+anyhow.workspace = true
+axum.workspace = true
+reqwest.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tower.workspace = true
+xpay-facilitator-mock.workspace = true
+xpay-seller.workspace = true
+xpay-wallet.workspace = true
+xpay-x402.workspace = true
+
+[lints]
+workspace = true

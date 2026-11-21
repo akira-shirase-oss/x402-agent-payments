@@ -16,11 +16,25 @@ publish = false
 xpay-http = { path = "crates/xpay-http" }
 xpay-db = { path = "crates/xpay-db" }
 xpay-accounts = { path = "crates/xpay-accounts" }
+xpay-x402 = { path = "crates/xpay-x402" }
+xpay-facilitator-mock = { path = "crates/xpay-facilitator-mock" }
+xpay-seller = { path = "crates/xpay-seller" }
+xpay-wallet = { path = "crates/xpay-wallet" }
 
 # External crates: versions live here only. Minimal features; one async runtime (Tokio). One
 # TLS stack, rustls, and only for the database client: Neon requires TLS. The service itself
 # listens on loopback behind Caddy and mails through a loopback relay.
+# x402 (docs/DECISIONS.md D-004..): EIP-712 hashing, secp256k1 signing and recovery for the
+# EIP-3009 authorisation (alloy's primitives, sol-types and local signer, not the full meta
+# crate), the base64 header encoding, and the buyer's HTTP client.
+alloy-primitives = { version = "1.7.3", default-features = false, features = ["std", "k256"] }
+alloy-signer = { version = "2.6.1", default-features = false }
+alloy-signer-local = { version = "2.6.1", default-features = false }
+alloy-sol-types = { version = "1.7.3", default-features = false, features = ["std"] }
 anyhow = "1.0.104"
+base64 = "0.22.1"
+reqwest = { version = "0.13.5", default-features = false, features = ["json", "rustls-no-provider"] }
+rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
 argon2 = { version = "0.5.3", default-features = false, features = ["alloc", "password-hash", "std"] }
 axum = { version = "0.8.9", default-features = false, features = ["http1", "json", "tokio", "query", "matched-path", "original-uri"] }
 getrandom = { version = "0.3.4", features = ["std"] }

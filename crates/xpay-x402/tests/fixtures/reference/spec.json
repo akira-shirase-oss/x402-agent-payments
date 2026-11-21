@@ -1,0 +1,380 @@
+{
+  "source": "https://github.com/x402-foundation/x402",
+  "commit": "e35bf8846f3e40f584f7235ea96c0841cb597b27",
+  "vectors": [
+    {
+      "name": "specs/x402-specification-v2.md:79",
+      "kind": "payment_required",
+      "json": {
+        "x402Version": 2,
+        "error": "PAYMENT-SIGNATURE header is required",
+        "resource": {
+          "url": "https://api.example.com/premium-data",
+          "description": "Access to premium market data",
+          "mimeType": "application/json",
+          "serviceName": "Example Market Data",
+          "tags": [
+            "market-data",
+            "finance"
+          ],
+          "iconUrl": "https://api.example.com/icon.png"
+        },
+        "accepts": [
+          {
+            "scheme": "exact",
+            "network": "eip155:84532",
+            "amount": "10000",
+            "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+            "payTo": "0x209693Bc6afc0C5328bA36FaF03C514EF312287C",
+            "maxTimeoutSeconds": 60,
+            "extra": {
+              "name": "USDC",
+              "version": "2"
+            }
+          }
+        ],
+        "extensions": {}
+      }
+    },
+    {
+      "name": "specs/x402-specification-v2.md:159",
+      "kind": "payment_payload",
+      "json": {
+        "x402Version": 2,
+        "resource": {
+          "url": "https://api.example.com/premium-data",
+          "description": "Access to premium market data",
+          "mimeType": "application/json"
+        },
+        "accepted": {
+          "scheme": "exact",
+          "network": "eip155:84532",
+          "amount": "10000",
+          "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+          "payTo": "0x209693Bc6afc0C5328bA36FaF03C514EF312287C",
+          "maxTimeoutSeconds": 60,
+          "extra": {
+            "name": "USDC",
+            "version": "2"
+          }
+        },
+        "payload": {
+          "signature": "0x2d6a7588d6acca505cbf0d9a4a227e0c52c6c34008c8e8986a1283259764173608a2ce6496642e377d6da8dbbf5836e9bd15092f9ecab05ded3d6293af148b571c",
+          "authorization": {
+            "from": "0x857b06519E91e3A54538791bDbb0E22373e36b66",
+            "to": "0x209693Bc6afc0C5328bA36FaF03C514EF312287C",
+            "value": "10000",
+            "validAfter": "1740672089",
+            "validBefore": "1740672154",
+            "nonce": "0xf3746613c2d920b5fdabc0856f2aeb2d4f88ee6037b8cc5d04a71a4462f13480"
+          }
+        },
+        "extensions": {}
+      }
+    },
+    {
+      "name": "specs/x402-specification-v2.md:232",
+      "kind": "settle_response",
+      "json": {
+        "success": true,
+        "transaction": "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+        "network": "eip155:84532",
+        "payer": "0x857b06519E91e3A54538791bDbb0E22373e36b66"
+      }
+    },
+    {
+      "name": "specs/x402-specification-v2.md:328",
+      "kind": "facilitator_request",
+      "json": {
+        "x402Version": 2,
+        "paymentPayload": {
+          "x402Version": 2,
+          "resource": {
+            "url": "https://api.example.com/premium-data",
+            "description": "Access to premium market data",
+            "mimeType": "application/json"
+          },
+          "accepted": {
+            "scheme": "exact",
+            "network": "eip155:84532",
+            "amount": "10000",
+            "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+            "payTo": "0x209693Bc6afc0C5328bA36FaF03C514EF312287C",
+            "maxTimeoutSeconds": 60,
+            "extra": {
+              "name": "USDC",
+              "version": "2"
+            }
+          },
+          "payload": {
+            "signature": "0x...",
+            "authorization": {
+              "from": "0x...",
+              "to": "0x...",
+              "value": "10000",
+              "validAfter": "1740672089",
+              "validBefore": "1740672154",
+              "nonce": "0x..."
+            }
+          }
+        },
+        "paymentRequirements": {
+          "scheme": "exact",
+          "network": "eip155:84532",
+          "amount": "10000",
+          "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+          "payTo": "0x209693Bc6afc0C5328bA36FaF03C514EF312287C",
+          "maxTimeoutSeconds": 60,
+          "extra": {
+            "name": "USDC",
+            "version": "2"
+          }
+        }
+      }
+    },
+    {
+      "name": "specs/x402-specification-v2.md:379",
+      "kind": "verify_response",
+      "json": {
+        "isValid": true,
+        "payer": "0x857b06519E91e3A54538791bDbb0E22373e36b66"
+      }
+    },
+    {
+      "name": "specs/x402-specification-v2.md:388",
+      "kind": "verify_response",
+      "json": {
+        "isValid": false,
+        "invalidReason": "insufficient_funds",
+        "payer": "0x857b06519E91e3A54538791bDbb0E22373e36b66"
+      }
+    },
+    {
+      "name": "specs/x402-specification-v2.md:408",
+      "kind": "settle_response",
+      "json": {
+        "success": true,
+        "payer": "0x857b06519E91e3A54538791bDbb0E22373e36b66",
+        "transaction": "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+        "network": "eip155:84532"
+      }
+    },
+    {
+      "name": "specs/x402-specification-v2.md:419",
+      "kind": "settle_response",
+      "json": {
+        "success": false,
+        "errorReason": "insufficient_funds",
+        "payer": "0x857b06519E91e3A54538791bDbb0E22373e36b66",
+        "transaction": "",
+        "network": "eip155:84532"
+      }
+    },
+    {
+      "name": "specs/x402-specification-v2.md:448",
+      "kind": "supported",
+      "json": {
+        "kinds": [
+          {
+            "x402Version": 2,
+            "scheme": "exact",
+            "network": "eip155:84532"
+          },
+          {
+            "x402Version": 2,
+            "scheme": "exact",
+            "network": "eip155:8453"
+          },
+          {
+            "x402Version": 2,
+            "scheme": "exact",
+            "network": "eip155:43113"
+          },
+          {
+            "x402Version": 2,
+            "scheme": "exact",
+            "network": "eip155:43114"
+          }
+        ],
+        "extensions": [],
+        "signers": {
+          "eip155:*": [
+            "0x1234567890abcdef1234567890abcdef12345678"
+          ],
+          "solana:*": [
+            "CKPKJWNdJEqa81x7CkZ14BVPiY6y16Sxs7owznqtWYp5"
+          ]
+        }
+      }
+    },
+    {
+      "name": "specs/schemes/exact/scheme_exact_evm.md:35",
+      "kind": "payment_payload",
+      "json": {
+        "x402Version": 2,
+        "resource": {
+          "url": "https://api.example.com/premium-data",
+          "description": "Access to premium market data",
+          "mimeType": "application/json"
+        },
+        "accepted": {
+          "scheme": "exact",
+          "network": "eip155:84532",
+          "amount": "10000",
+          "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+          "payTo": "0x209693Bc6afc0C5328bA36FaF03C514EF312287C",
+          "maxTimeoutSeconds": 60,
+          "extra": {
+            "assetTransferMethod": "eip3009",
+            "name": "USDC",
+            "version": "2"
+          }
+        },
+        "payload": {
+          "signature": "0x2d6a7588d6acca505cbf0d9a4a227e0c52c6c34008c8e8986a1283259764173608a2ce6496642e377d6da8dbbf5836e9bd15092f9ecab05ded3d6293af148b571c",
+          "authorization": {
+            "from": "0x857b06519E91e3A54538791bDbb0E22373e36b66",
+            "to": "0x209693Bc6afc0C5328bA36FaF03C514EF312287C",
+            "value": "10000",
+            "validAfter": "1740672089",
+            "validBefore": "1740672154",
+            "nonce": "0xf3746613c2d920b5fdabc0856f2aeb2d4f88ee6037b8cc5d04a71a4462f13480"
+          }
+        }
+      }
+    },
+    {
+      "name": "specs/schemes/exact/scheme_exact_evm.md:254",
+      "kind": "payment_payload",
+      "json": {
+        "x402Version": 2,
+        "resource": {
+          "url": "https://api.example.com/premium-data",
+          "description": "Access to premium market data",
+          "mimeType": "application/json"
+        },
+        "accepted": {
+          "scheme": "exact",
+          "network": "eip155:84532",
+          "amount": "10000",
+          "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+          "payTo": "0x209693Bc6afc0C5328bA36FaF03C514EF312287C",
+          "maxTimeoutSeconds": 60,
+          "extra": {
+            "assetTransferMethod": "erc7710",
+            "name": "USDC",
+            "version": "2"
+          }
+        },
+        "payload": {
+          "delegationManager": "0xDelegationManagerAddress",
+          "permissionContext": "0x...",
+          "delegator": "0x857b06519E91e3A54538791bDbb0E22373e36b66"
+        }
+      }
+    },
+    {
+      "name": "specs/transports-v2/http.md:30",
+      "kind": "payment_required",
+      "json": {
+        "x402Version": 2,
+        "error": "PAYMENT-SIGNATURE header is required",
+        "resource": {
+          "url": "https://api.example.com/premium-data",
+          "description": "Access to premium market data",
+          "mimeType": "application/json"
+        },
+        "accepts": [
+          {
+            "scheme": "exact",
+            "network": "eip155:84532",
+            "amount": "10000",
+            "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+            "payTo": "0x209693Bc6afc0C5328bA36FaF03C514EF312287C",
+            "maxTimeoutSeconds": 60,
+            "extra": {
+              "name": "USDC",
+              "version": "2"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "specs/transports-v2/http.md:78",
+      "kind": "payment_payload",
+      "json": {
+        "x402Version": 2,
+        "resource": {
+          "url": "https://api.example.com/premium-data",
+          "description": "Access to premium market data",
+          "mimeType": "application/json"
+        },
+        "accepted": {
+          "scheme": "exact",
+          "network": "eip155:84532",
+          "amount": "10000",
+          "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+          "payTo": "0x209693Bc6afc0C5328bA36FaF03C514EF312287C",
+          "maxTimeoutSeconds": 60,
+          "extra": {
+            "name": "USDC",
+            "version": "2"
+          }
+        },
+        "payload": {
+          "signature": "0x2d6a7588d6acca505cbf0d9a4a227e0c52c6c34008c8e8986a1283259764173608a2ce6496642e377d6da8dbbf5836e9bd15092f9ecab05ded3d6293af148b571c",
+          "authorization": {
+            "from": "0x857b06519E91e3A54538791bDbb0E22373e36b66",
+            "to": "0x209693Bc6afc0C5328bA36FaF03C514EF312287C",
+            "value": "10000",
+            "validAfter": "1740672089",
+            "validBefore": "1740672154",
+            "nonce": "0xf3746613c2d920b5fdabc0856f2aeb2d4f88ee6037b8cc5d04a71a4462f13480"
+          }
+        }
+      }
+    },
+    {
+      "name": "specs/transports-v2/http.md:134",
+      "kind": "settle_response",
+      "json": {
+        "success": true,
+        "transaction": "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+        "network": "eip155:84532",
+        "payer": "0x857b06519E91e3A54538791bDbb0E22373e36b66"
+      }
+    },
+    {
+      "name": "specs/transports-v2/http.md:155",
+      "kind": "settle_response",
+      "json": {
+        "success": false,
+        "errorReason": "insufficient_funds",
+        "transaction": "",
+        "network": "eip155:84532",
+        "payer": "0x857b06519E91e3A54538791bDbb0E22373e36b66"
+      }
+    },
+    {
+      "name": "specs/transports-v2/http.md:22",
+      "kind": "payment_required",
+      "header": "eyJ4NDAyVmVyc2lvbiI6MiwiZXJyb3IiOiJQQVlNRU5ULVNJR05BVFVSRSBoZWFkZXIgaXMgcmVxdWlyZWQiLCJyZXNvdXJjZSI6eyJ1cmwiOiJodHRwczovL2FwaS5leGFtcGxlLmNvbS9wcmVtaXVtLWRhdGEiLCJkZXNjcmlwdGlvbiI6IkFjY2VzcyB0byBwcmVtaXVtIG1hcmtldCBkYXRhIiwibWltZVR5cGUiOiJhcHBsaWNhdGlvbi9qc29uIn0sImFjY2VwdHMiOlt7InNjaGVtZSI6ImV4YWN0IiwibmV0d29yayI6ImVpcDE1NTo4NDUzMiIsImFtb3VudCI6IjEwMDAwIiwiYXNzZXQiOiIweDAzNkNiRDUzODQyYzU0MjY2MzRlNzkyOTU0MWVDMjMxOGYzZENGN2UiLCJwYXlUbyI6IjB4MjA5NjkzQmM2YWZjMEM1MzI4YkEzNkZhRjAzQzUxNEVGMzEyMjg3QyIsIm1heFRpbWVvdXRTZWNvbmRzIjo2MCwiZXh0cmEiOnsibmFtZSI6IlVTREMiLCJ2ZXJzaW9uIjoiMiJ9fV19"
+    },
+    {
+      "name": "specs/transports-v2/http.md:67",
+      "kind": "payment_payload",
+      "header": "eyJ4NDAyVmVyc2lvbiI6MiwicmVzb3VyY2UiOnsidXJsIjoiaHR0cHM6Ly9hcGkuZXhhbXBsZS5jb20vcHJlbWl1bS1kYXRhIiwiZGVzY3JpcHRpb24iOiJBY2Nlc3MgdG8gcHJlbWl1bSBtYXJrZXQgZGF0YSIsIm1pbWVUeXBlIjoiYXBwbGljYXRpb24vanNvbiJ9LCJhY2NlcHRlZCI6eyJzY2hlbWUiOiJleGFjdCIsIm5ldHdvcmsiOiJlaXAxNTU6ODQ1MzIiLCJhbW91bnQiOiIxMDAwMCIsImFzc2V0IjoiMHgwMzZDYkQ1Mzg0MmM1NDI2NjM0ZTc5Mjk1NDFlQzIzMThmM2RDRjdlIiwicGF5VG8iOiIweDIwOTY5M0JjNmFmYzBDNTMyOGJBMzZGYUYwM0M1MTRFRjMxMjI4N0MiLCJtYXhUaW1lb3V0U2Vjb25kcyI6NjAsImV4dHJhIjp7Im5hbWUiOiJVU0RDIiwidmVyc2lvbiI6IjIifX0sInBheWxvYWQiOnsic2lnbmF0dXJlIjoiMHgyZDZhNzU4OGQ2YWNjYTUwNWNiZjBkOWE0YTIyN2UwYzUyYzZjMzQwMDhjOGU4OTg2YTEyODMyNTk3NjQxNzM2MDhhMmNlNjQ5NjY0MmUzNzdkNmRhOGRiYmY1ODM2ZTliZDE1MDkyZjllY2FiMDVkZWQzZDYyOTNhZjE0OGI1NzFjIiwiYXV0aG9yaXphdGlvbiI6eyJmcm9tIjoiMHg4NTdiMDY1MTlFOTFlM0E1NDUzODc5MWJEYmIwRTIyMzczZTM2YjY2IiwidG8iOiIweDIwOTY5M0JjNmFmYzBDNTMyOGJBMzZGYUYwM0M1MTRFRjMxMjI4N0MiLCJ2YWx1ZSI6IjEwMDAwIiwidmFsaWRBZnRlciI6IjE3NDA2NzIwODkiLCJ2YWxpZEJlZm9yZSI6IjE3NDA2NzIxNTQiLCJub25jZSI6IjB4ZjM3NDY2MTNjMmQ5MjBiNWZkYWJjMDg1NmYyYWViMmQ0Zjg4ZWU2MDM3YjhjYzVkMDRhNzFhNDQ2MmYxMzQ4MCJ9fX0="
+    },
+    {
+      "name": "specs/transports-v2/http.md:123",
+      "kind": "settle_response",
+      "header": "eyJzdWNjZXNzIjp0cnVlLCJ0cmFuc2FjdGlvbiI6IjB4MTIzNDU2Nzg5MGFiY2RlZjEyMzQ1Njc4OTBhYmNkZWYxMjM0NTY3ODkwYWJjZGVmMTIzNDU2Nzg5MGFiY2RlZiIsIm5ldHdvcmsiOiJlaXAxNTU6ODQ1MzIiLCJwYXllciI6IjB4ODU3YjA2NTE5RTkxZTNBNTQ1Mzg3OTFiRGJiMEUyMjM3M2UzNmI2NiJ9"
+    },
+    {
+      "name": "specs/transports-v2/http.md:147",
+      "kind": "settle_response",
+      "header": "eyJzdWNjZXNzIjpmYWxzZSwiZXJyb3JSZWFzb24iOiJpbnN1ZmZpY2llbnRfZnVuZHMiLCJ0cmFuc2FjdGlvbiI6IiIsIm5ldHdvcmsiOiJlaXAxNTU6ODQ1MzIiLCJwYXllciI6IjB4ODU3YjA2NTE5RTkxZTNBNTQ1Mzg3OTFiRGJiMEUyMjM3M2UzNmI2NiJ9"
+    }
+  ]
+}

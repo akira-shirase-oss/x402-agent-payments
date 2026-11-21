@@ -1,0 +1,93 @@
+{
+  "checks": [
+    {
+      "check": "every payment served exactly once",
+      "pass": true
+    },
+    {
+      "check": "200s == payments",
+      "pass": true
+    },
+    {
+      "check": "flood payments served at most once",
+      "pass": true
+    },
+    {
+      "check": "no claim left in flight",
+      "pass": true
+    },
+    {
+      "check": "every settlement recorded",
+      "pass": true
+    },
+    {
+      "check": "every 200 is a delivered claim",
+      "pass": true
+    },
+    {
+      "check": "handler runs >= 200s",
+      "pass": true
+    },
+    {
+      "check": "no unexpected status",
+      "pass": true
+    },
+    {
+      "check": "a full store serves at most its capacity, then sheds",
+      "pass": true
+    },
+    {
+      "check": "p99 below the threshold",
+      "pass": true
+    }
+  ],
+  "commit": "2a7eb51a0fc8e1a3f44e0ddf50b5e700061523d6",
+  "concurrency": 256,
+  "counts": {
+    "claims_delivered": 772084,
+    "claims_paid_not_delivered": 25901,
+    "claims_settled": 797985,
+    "flood_served": 47885,
+    "flood_shed": 2115,
+    "fresh": 700100,
+    "handler_runs": 772096,
+    "hung_up": 50000,
+    "refused": 199900,
+    "replay_served": 8813,
+    "served": 691287,
+    "settlements": 797985,
+    "unexpected": 0
+  },
+  "dirty": false,
+  "facilitator_latency_ms": 1,
+  "full_store": {
+    "capacity": 64,
+    "pass": true,
+    "requests": 10000,
+    "served": 64,
+    "shed": 9936,
+    "unexpected": 0
+  },
+  "latency_ms": {
+    "max": 161.041,
+    "p50": 10.754,
+    "p90": 23.156,
+    "p99": 37.191
+  },
+  "machine": {
+    "cores": 8,
+    "cpu": "Intel(R) Xeon(R) Processor",
+    "load_average": "5.62 2.32 1.32",
+    "memory": "32866576 kB",
+    "os": "Ubuntu 22.04.5 LTS"
+  },
+  "mode": "full",
+  "requests": 1000000,
+  "requests_per_second": 18405.91262200118,
+  "scenario": "x402-paid",
+  "seconds": 54.330367667,
+  "signing_seconds": 8.97253222,
+  "thresholds": {
+    "p99_ms_below": 50.0
+  }
+}

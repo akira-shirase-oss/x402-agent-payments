@@ -1,0 +1,26 @@
+[package]
+name = "xpay-wallet"
+description = "The x402 buyer: pays a 402 within a spend cap and a host allowlist, then retries with the proof."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+alloy-primitives = { workspace = true, features = ["getrandom"] }
+alloy-signer.workspace = true
+reqwest.workspace = true
+rustls.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+xpay-x402.workspace = true
+
+[dev-dependencies]
+alloy-signer-local.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
+
+[lints]
+workspace = true

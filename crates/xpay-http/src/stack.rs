@@ -300,11 +300,13 @@ async fn count_errors(
 /// Applies the global stack to `router`.
 pub fn apply(router: Router, limits: StackLimits, window: Arc<ErrorWindow>) -> Router {
     let stack = ServiceBuilder::new()
-        // 0. Credentials are redacted from any Debug output of the request.
+        // 0. Credentials (and payment proofs) are redacted from any Debug output of the request.
         .layer(SetSensitiveRequestHeadersLayer::new([
             header::AUTHORIZATION,
             header::COOKIE,
             HeaderName::from_static("idempotency-key"),
+            // An x402 proof can be settled by whoever holds it until it is.
+            HeaderName::from_static("payment-signature"),
         ]))
         // 1. Drop unsafe client ids before anything logs them.
         .layer(axum_mw::map_request(sanitize_request_id))
@@ -396,5 +398,30 @@ mod tests {
         );
         tokio::time::advance(Duration::from_secs(300)).await;
         assert_eq!(window.counts().requests, 0);
+    }
+
+    #[tokio::test]
+    async fn a_payment_proof_is_a_sensitive_header() {
+        use tower::ServiceExt as _;
+        let app = apply(
+            Router::new().route(
+                "/",
+                axum::routing::get(|req: Request| async move {
+                    let h = req.headers().get("payment-signature");
+                    if h.is_some_and(HeaderValue::is_sensitive) {
+                        StatusCode::OK
+                    } else {
+                        StatusCode::IM_A_TEAPOT
+                    }
+                }),
+            ),
+            StackLimits::default(),
+            Arc::new(ErrorWindow::default()),
+        );
+        let req = Request::get("/")
+            .header("payment-signature", "eyJ4NDAyVmVyc2lvbiI6Mn0")
+            .body(Body::empty())
+            .unwrap();
+        assert_eq!(app.oneshot(req).await.unwrap().status(), StatusCode::OK);
     }
 }

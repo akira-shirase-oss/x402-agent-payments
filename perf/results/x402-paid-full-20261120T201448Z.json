@@ -1,0 +1,56 @@
+{
+  "checks": [
+    {
+      "check": "every payment served exactly once",
+      "pass": false
+    },
+    {
+      "check": "200s == payments",
+      "pass": false
+    },
+    {
+      "check": "handler runs == settlements == fresh payments",
+      "pass": false
+    },
+    {
+      "check": "no unexpected status",
+      "pass": true
+    },
+    {
+      "check": "p99 below the threshold",
+      "pass": true
+    }
+  ],
+  "commit": "f70f6e01cb900151d9417449bd58196238bff506",
+  "concurrency": 256,
+  "counts": {
+    "fresh": 800100,
+    "refused": 291513,
+    "replay_served": 16459,
+    "served": 692028,
+    "unexpected": 0
+  },
+  "dirty": true,
+  "latency_ms": {
+    "max": 134.251,
+    "p50": 0.442,
+    "p90": 0.518,
+    "p99": 1.1
+  },
+  "machine": {
+    "cores": 8,
+    "cpu": "Intel(R) Xeon(R) Processor",
+    "load_average": "5.83 2.99 1.49",
+    "memory": "32866576 kB",
+    "os": "Ubuntu 22.04.5 LTS"
+  },
+  "mode": "full",
+  "requests": 1000000,
+  "requests_per_second": 21053.259512135897,
+  "scenario": "x402-paid",
+  "seconds": 47.498583268,
+  "signing_seconds": 6.9602106280000005,
+  "thresholds": {
+    "p99_ms_below": 50.0
+  }
+}

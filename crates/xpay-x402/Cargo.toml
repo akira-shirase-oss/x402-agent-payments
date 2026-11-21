@@ -1,0 +1,24 @@
+[package]
+name = "xpay-x402"
+description = "x402 v2 wire types, the bounded header codec, CAIP-2 ids and the exact EVM (EIP-3009) scheme."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+alloy-primitives.workspace = true
+alloy-signer.workspace = true
+alloy-sol-types.workspace = true
+base64.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+alloy-signer-local.workspace = true
+proptest.workspace = true
+
+[lints]
+workspace = true

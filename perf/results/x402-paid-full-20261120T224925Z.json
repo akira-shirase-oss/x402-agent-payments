@@ -1,0 +1,93 @@
+{
+  "checks": [
+    {
+      "check": "every payment served exactly once",
+      "pass": false
+    },
+    {
+      "check": "200s == payments",
+      "pass": false
+    },
+    {
+      "check": "flood payments served at most once",
+      "pass": true
+    },
+    {
+      "check": "no claim left in flight",
+      "pass": true
+    },
+    {
+      "check": "every settlement recorded",
+      "pass": true
+    },
+    {
+      "check": "every 200 is a delivered claim",
+      "pass": true
+    },
+    {
+      "check": "handler runs >= 200s",
+      "pass": true
+    },
+    {
+      "check": "no unexpected status",
+      "pass": false
+    },
+    {
+      "check": "a full store serves at most its capacity, then sheds",
+      "pass": true
+    },
+    {
+      "check": "p99 below the threshold",
+      "pass": true
+    }
+  ],
+  "commit": "40a96dea0366db103d6b536397632ece197ffc4f",
+  "concurrency": 256,
+  "counts": {
+    "claims_delivered": 364329,
+    "claims_paid_not_delivered": 14617,
+    "claims_settled": 378946,
+    "flood_served": 38704,
+    "flood_shed": 11296,
+    "fresh": 700100,
+    "handler_runs": 364332,
+    "hung_up": 50000,
+    "refused": 130130,
+    "replay_served": 17222,
+    "served": 300947,
+    "settlements": 378946,
+    "unexpected": 451701
+  },
+  "dirty": false,
+  "facilitator_latency_ms": 1,
+  "full_store": {
+    "capacity": 64,
+    "pass": true,
+    "requests": 10000,
+    "served": 64,
+    "shed": 9936,
+    "unexpected": 0
+  },
+  "latency_ms": {
+    "max": 137.442,
+    "p50": 0.192,
+    "p90": 21.453,
+    "p99": 49.848
+  },
+  "machine": {
+    "cores": 8,
+    "cpu": "Intel(R) Xeon(R) Processor",
+    "load_average": "4.99 2.49 1.70",
+    "memory": "32866576 kB",
+    "os": "Ubuntu 22.04.5 LTS"
+  },
+  "mode": "full",
+  "requests": 1000000,
+  "requests_per_second": 23508.19907876301,
+  "scenario": "x402-paid",
+  "seconds": 42.538349988,
+  "signing_seconds": 6.944259321,
+  "thresholds": {
+    "p99_ms_below": 50.0
+  }
+}

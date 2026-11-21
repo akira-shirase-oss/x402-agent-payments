@@ -1,0 +1,32 @@
+[package]
+name = "xpay-seller"
+description = "The x402 seller: a Tower layer that answers 402, claims the nonce, settles through a facilitator, then serves."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+alloy-primitives.workspace = true
+axum.workspace = true
+reqwest.workspace = true
+rustls.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tower.workspace = true
+tracing.workspace = true
+xpay-x402.workspace = true
+
+[dev-dependencies]
+base64.workspace = true
+alloy-signer-local.workspace = true
+http-body-util.workspace = true
+proptest.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
+xpay-facilitator-mock.workspace = true
+
+[lints]
+workspace = true

@@ -50,7 +50,12 @@ Dependabot weekly (grouped minor and patch; a semver-major comes alone).
 | thiserror, anyhow | 2.0.21, 1.0.104 | errors (libraries, binaries) |
 | tracing, tracing-subscriber | 0.1.44, 0.3.23 | JSON logs |
 | uuid, time, hex | 1.29.2, 0.3.55, 0.4.3 | ids, times, encoding |
-| proptest (tests only) | 1.12.0 | the plan-limit property test |
+| proptest (tests only) | 1.12.0 | the plan-limit property test; the x402 header fuzz target |
+| alloy-primitives, alloy-sol-types | 1.7.3, 1.7.3 | x402 `exact`: EIP-712 hashing, signature recovery (`k256`) |
+| alloy-signer, alloy-signer-local | 2.6.1, 2.6.1 | the buyer's EIP-712 signing |
+| base64 | 0.22.1 | the x402 HTTP headers |
+| reqwest, rustls | 0.13.5, 0.23.46 | the facilitator and buyer HTTP client, rustls on ring |
+| x402 (PyPI, gate only) | 2.28.0 | the official reference for conformance, hash-pinned in `scripts/x402-reference/requirements.txt` |
 
 `sha2` 0.11 and `getrandom` 0.4 are newer majors; Dependabot proposes each as its own pull
 request, which the copy takes when it has read their changes.

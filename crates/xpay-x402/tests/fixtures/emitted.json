@@ -1,0 +1,566 @@
+{
+  "signed": [
+    {
+      "expect": "valid",
+      "name": "valid-base-sepolia",
+      "now": 1800000000,
+      "payload": {
+        "accepted": {
+          "amount": "10000",
+          "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+          "extra": {
+            "name": "USDC",
+            "version": "2"
+          },
+          "maxTimeoutSeconds": 60,
+          "network": "eip155:84532",
+          "payTo": "0x209693Bc6afc0C5328bA36FaF03C514EF312287C",
+          "scheme": "exact"
+        },
+        "payload": {
+          "authorization": {
+            "from": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A",
+            "nonce": "0x4242424242424242424242424242424242424242424242424242424242424242",
+            "to": "0x209693Bc6afc0C5328bA36FaF03C514EF312287C",
+            "validAfter": "1799999400",
+            "validBefore": "1800000060",
+            "value": "10000"
+          },
+          "signature": "0x831906e9854987ebd6ebcd308069c728084e89f326beba19f0da7137902e58c2164f8c8be56d7518fca32a85834eebf575d8fb9ebdd8d74e97f5a7341370e7801c"
+        },
+        "resource": {
+          "url": "https://api.example.com/premium-data"
+        },
+        "x402Version": 2
+      },
+      "requirements": {
+        "amount": "10000",
+        "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+        "extra": {
+          "name": "USDC",
+          "version": "2"
+        },
+        "maxTimeoutSeconds": 60,
+        "network": "eip155:84532",
+        "payTo": "0x209693Bc6afc0C5328bA36FaF03C514EF312287C",
+        "scheme": "exact"
+      }
+    },
+    {
+      "expect": "valid",
+      "name": "valid-base-usd-coin-domain",
+      "now": 1800000000,
+      "payload": {
+        "accepted": {
+          "amount": "10000",
+          "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "extra": {
+            "name": "USD Coin",
+            "version": "2"
+          },
+          "maxTimeoutSeconds": 60,
+          "network": "eip155:8453",
+          "payTo": "0x209693Bc6afc0C5328bA36FaF03C514EF312287C",
+          "scheme": "exact"
+        },
+        "payload": {
+          "authorization": {
+            "from": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A",
+            "nonce": "0x4242424242424242424242424242424242424242424242424242424242424242",
+            "to": "0x209693Bc6afc0C5328bA36FaF03C514EF312287C",
+            "validAfter": "1799999400",
+            "validBefore": "1800000060",
+            "value": "10000"
+          },
+          "signature": "0x93b34e0ecc4902cb51a7db9e93dbe65ab2794bfb339db96fcb91915e8d9f9ba47c37cd4b039caf4eed1b9192c96b9ee838abee5668b84d1e7f42462f71f3e89b1b"
+        },
+        "resource": {
+          "url": "https://api.example.com/premium-data"
+        },
+        "x402Version": 2
+      },
+      "requirements": {
+        "amount": "10000",
+        "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+        "extra": {
+          "name": "USD Coin",
+          "version": "2"
+        },
+        "maxTimeoutSeconds": 60,
+        "network": "eip155:8453",
+        "payTo": "0x209693Bc6afc0C5328bA36FaF03C514EF312287C",
+        "scheme": "exact"
+      }
+    },
+    {
+      "expect": "invalid_exact_evm_payload_authorization_value_mismatch",
+      "name": "wrong-amount",
+      "now": 1800000000,
+      "payload": {
+        "accepted": {
+          "amount": "10000",
+          "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+          "extra": {
+            "name": "USDC",
+            "version": "2"
+          },
+          "maxTimeoutSeconds": 60,
+          "network": "eip155:84532",
+          "payTo": "0x209693Bc6afc0C5328bA36FaF03C514EF312287C",
+          "scheme": "exact"
+        },
+        "payload": {
+          "authorization": {
+            "from": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A",
+            "nonce": "0x4242424242424242424242424242424242424242424242424242424242424242",
+            "to": "0x209693Bc6afc0C5328bA36FaF03C514EF312287C",
+            "validAfter": "1799999400",
+            "validBefore": "1800000060",
+            "value": "9999"
+          },
+          "signature": "0x50e7c34c63aae5fdf186a6f1daa23b2c5e0fe1cbad5c14f2081f164d3d6f15467d8a70b049b721c7b5e75c2c2fa25a925bea6668b560ec2e06238354809e68fe1b"
+        },
+        "resource": {
+          "url": "https://api.example.com/premium-data"
+        },
+        "x402Version": 2
+      },
+      "requirements": {
+        "amount": "10000",
+        "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+        "extra": {
+          "name": "USDC",
+          "version": "2"
+        },
+        "maxTimeoutSeconds": 60,
+        "network": "eip155:84532",
+        "payTo": "0x209693Bc6afc0C5328bA36FaF03C514EF312287C",
+        "scheme": "exact"
+      }
+    },
+    {
+      "expect": "invalid_exact_evm_payload_recipient_mismatch",
+      "name": "wrong-recipient",
+      "now": 1800000000,
+      "payload": {
+        "accepted": {
+          "amount": "10000",
+          "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+          "extra": {
+            "name": "USDC",
+            "version": "2"
+          },
+          "maxTimeoutSeconds": 60,
+          "network": "eip155:84532",
+          "payTo": "0x209693Bc6afc0C5328bA36FaF03C514EF312287C",
+          "scheme": "exact"
+        },
+        "payload": {
+          "authorization": {
+            "from": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A",
+            "nonce": "0x4242424242424242424242424242424242424242424242424242424242424242",
+            "to": "0x000000000000000000000000000000000000dEaD",
+            "validAfter": "1799999400",
+            "validBefore": "1800000060",
+            "value": "10000"
+          },
+          "signature": "0x136c91eb00afcb63ffeacf9c0c7045fa63d0949a2c8c6d2525e5d1134607403f46ac7c83c257315d1b166920cf9526ae93235322440b50099e5b7f3151ddef581c"
+        },
+        "resource": {
+          "url": "https://api.example.com/premium-data"
+        },
+        "x402Version": 2
+      },
+      "requirements": {
+        "amount": "10000",
+        "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+        "extra": {
+          "name": "USDC",
+          "version": "2"
+        },
+        "maxTimeoutSeconds": 60,
+        "network": "eip155:84532",
+        "payTo": "0x209693Bc6afc0C5328bA36FaF03C514EF312287C",
+        "scheme": "exact"
+      }
+    },
+    {
+      "expect": "invalid_exact_evm_payload_authorization_valid_before",
+      "name": "expired",
+      "now": 1800000000,
+      "payload": {
+        "accepted": {
+          "amount": "10000",
+          "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+          "extra": {
+            "name": "USDC",
+            "version": "2"
+          },
+          "maxTimeoutSeconds": 60,
+          "network": "eip155:84532",
+          "payTo": "0x209693Bc6afc0C5328bA36FaF03C514EF312287C",
+          "scheme": "exact"
+        },
+        "payload": {
+          "authorization": {
+            "from": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A",
+            "nonce": "0x4242424242424242424242424242424242424242424242424242424242424242",
+            "to": "0x209693Bc6afc0C5328bA36FaF03C514EF312287C",
+            "validAfter": "1799999400",
+            "validBefore": "1799999999",
+            "value": "10000"
+          },
+          "signature": "0x5463c03bdd9cf8cdabc79d37b0b2a4ac6d53958d0966e74df82fe0695d2023be00f655ad7daa304cacef154cc967df7a7c897a8f2ddc0a0478752af7bd12084b1b"
+        },
+        "resource": {
+          "url": "https://api.example.com/premium-data"
+        },
+        "x402Version": 2
+      },
+      "requirements": {
+        "amount": "10000",
+        "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+        "extra": {
+          "name": "USDC",
+          "version": "2"
+        },
+        "maxTimeoutSeconds": 60,
+        "network": "eip155:84532",
+        "payTo": "0x209693Bc6afc0C5328bA36FaF03C514EF312287C",
+        "scheme": "exact"
+      }
+    },
+    {
+      "expect": "invalid_exact_evm_payload_authorization_valid_after",
+      "name": "not-yet-valid",
+      "now": 1800000000,
+      "payload": {
+        "accepted": {
+          "amount": "10000",
+          "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+          "extra": {
+            "name": "USDC",
+            "version": "2"
+          },
+          "maxTimeoutSeconds": 60,
+          "network": "eip155:84532",
+          "payTo": "0x209693Bc6afc0C5328bA36FaF03C514EF312287C",
+          "scheme": "exact"
+        },
+        "payload": {
+          "authorization": {
+            "from": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A",
+            "nonce": "0x4242424242424242424242424242424242424242424242424242424242424242",
+            "to": "0x209693Bc6afc0C5328bA36FaF03C514EF312287C",
+            "validAfter": "1800000060",
+            "validBefore": "1800000060",
+            "value": "10000"
+          },
+          "signature": "0x94a3a3a224e65edd214f6ec4c9196da9a896557ae6e4ca3aa6d1560ee0abf7624119561a7e961a471e6ad6711986ce736614fcfb195dc0635541fe642a858bfe1b"
+        },
+        "resource": {
+          "url": "https://api.example.com/premium-data"
+        },
+        "x402Version": 2
+      },
+      "requirements": {
+        "amount": "10000",
+        "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+        "extra": {
+          "name": "USDC",
+          "version": "2"
+        },
+        "maxTimeoutSeconds": 60,
+        "network": "eip155:84532",
+        "payTo": "0x209693Bc6afc0C5328bA36FaF03C514EF312287C",
+        "scheme": "exact"
+      }
+    },
+    {
+      "expect": "network_mismatch",
+      "name": "wrong-network",
+      "now": 1800000000,
+      "payload": {
+        "accepted": {
+          "amount": "10000",
+          "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "extra": {
+            "name": "USD Coin",
+            "version": "2"
+          },
+          "maxTimeoutSeconds": 60,
+          "network": "eip155:8453",
+          "payTo": "0x209693Bc6afc0C5328bA36FaF03C514EF312287C",
+          "scheme": "exact"
+        },
+        "payload": {
+          "authorization": {
+            "from": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A",
+            "nonce": "0x4242424242424242424242424242424242424242424242424242424242424242",
+            "to": "0x209693Bc6afc0C5328bA36FaF03C514EF312287C",
+            "validAfter": "1799999400",
+            "validBefore": "1800000060",
+            "value": "10000"
+          },
+          "signature": "0x831906e9854987ebd6ebcd308069c728084e89f326beba19f0da7137902e58c2164f8c8be56d7518fca32a85834eebf575d8fb9ebdd8d74e97f5a7341370e7801c"
+        },
+        "resource": {
+          "url": "https://api.example.com/premium-data"
+        },
+        "x402Version": 2
+      },
+      "requirements": {
+        "amount": "10000",
+        "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+        "extra": {
+          "name": "USDC",
+          "version": "2"
+        },
+        "maxTimeoutSeconds": 60,
+        "network": "eip155:84532",
+        "payTo": "0x209693Bc6afc0C5328bA36FaF03C514EF312287C",
+        "scheme": "exact"
+      }
+    },
+    {
+      "expect": "invalid_exact_evm_payload_signature",
+      "name": "tampered-signature",
+      "now": 1800000000,
+      "payload": {
+        "accepted": {
+          "amount": "10000",
+          "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+          "extra": {
+            "name": "USDC",
+            "version": "2"
+          },
+          "maxTimeoutSeconds": 60,
+          "network": "eip155:84532",
+          "payTo": "0x209693Bc6afc0C5328bA36FaF03C514EF312287C",
+          "scheme": "exact"
+        },
+        "payload": {
+          "authorization": {
+            "from": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A",
+            "nonce": "0x4242424242424242424242424242424242424242424242424242424242424242",
+            "to": "0x209693Bc6afc0C5328bA36FaF03C514EF312287C",
+            "validAfter": "1799999400",
+            "validBefore": "1800000061",
+            "value": "10000"
+          },
+          "signature": "0x831906e9854987ebd6ebcd308069c728084e89f326beba19f0da7137902e58c2164f8c8be56d7518fca32a85834eebf575d8fb9ebdd8d74e97f5a7341370e7801c"
+        },
+        "resource": {
+          "url": "https://api.example.com/premium-data"
+        },
+        "x402Version": 2
+      },
+      "requirements": {
+        "amount": "10000",
+        "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+        "extra": {
+          "name": "USDC",
+          "version": "2"
+        },
+        "maxTimeoutSeconds": 60,
+        "network": "eip155:84532",
+        "payTo": "0x209693Bc6afc0C5328bA36FaF03C514EF312287C",
+        "scheme": "exact"
+      }
+    },
+    {
+      "expect": "invalid_exact_evm_payload_signature",
+      "name": "sepolia-domain-name-on-base",
+      "now": 1800000000,
+      "payload": {
+        "accepted": {
+          "amount": "10000",
+          "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "extra": {
+            "name": "USD Coin",
+            "version": "2"
+          },
+          "maxTimeoutSeconds": 60,
+          "network": "eip155:8453",
+          "payTo": "0x209693Bc6afc0C5328bA36FaF03C514EF312287C",
+          "scheme": "exact"
+        },
+        "payload": {
+          "authorization": {
+            "from": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A",
+            "nonce": "0x4242424242424242424242424242424242424242424242424242424242424242",
+            "to": "0x209693Bc6afc0C5328bA36FaF03C514EF312287C",
+            "validAfter": "1799999400",
+            "validBefore": "1800000060",
+            "value": "10000"
+          },
+          "signature": "0x9ad185970d032b64ab672885be21e843d48faa8a5bc6bac0e20b2386dcd91207469154ce66120735dc0964ae5ccaef1292ee75e545705132f24bb9f4e6eb0cbe1b"
+        },
+        "resource": {
+          "url": "https://api.example.com/premium-data"
+        },
+        "x402Version": 2
+      },
+      "requirements": {
+        "amount": "10000",
+        "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+        "extra": {
+          "name": "USD Coin",
+          "version": "2"
+        },
+        "maxTimeoutSeconds": 60,
+        "network": "eip155:8453",
+        "payTo": "0x209693Bc6afc0C5328bA36FaF03C514EF312287C",
+        "scheme": "exact"
+      }
+    }
+  ],
+  "vectors": [
+    {
+      "header": "eyJ4NDAyVmVyc2lvbiI6MiwiZXJyb3IiOiJQQVlNRU5ULVNJR05BVFVSRSBoZWFkZXIgaXMgcmVxdWlyZWQiLCJyZXNvdXJjZSI6eyJ1cmwiOiJodHRwczovL2FwaS5leGFtcGxlLmNvbS9wcmVtaXVtLWRhdGEiLCJkZXNjcmlwdGlvbiI6IkFjY2VzcyB0byBwcmVtaXVtIG1hcmtldCBkYXRhIiwibWltZVR5cGUiOiJhcHBsaWNhdGlvbi9qc29uIn0sImFjY2VwdHMiOlt7InNjaGVtZSI6ImV4YWN0IiwibmV0d29yayI6ImVpcDE1NTo4NDUzMiIsImFtb3VudCI6IjEwMDAwIiwiYXNzZXQiOiIweDAzNkNiRDUzODQyYzU0MjY2MzRlNzkyOTU0MWVDMjMxOGYzZENGN2UiLCJwYXlUbyI6IjB4MjA5NjkzQmM2YWZjMEM1MzI4YkEzNkZhRjAzQzUxNEVGMzEyMjg3QyIsIm1heFRpbWVvdXRTZWNvbmRzIjo2MCwiZXh0cmEiOnsibmFtZSI6IlVTREMiLCJ2ZXJzaW9uIjoiMiJ9fSx7InNjaGVtZSI6ImV4YWN0IiwibmV0d29yayI6ImVpcDE1NTo4NDUzIiwiYW1vdW50IjoiMTAwMDAiLCJhc3NldCI6IjB4ODMzNTg5ZkNENmVEYjZFMDhmNGM3QzMyRDRmNzFiNTRiZEEwMjkxMyIsInBheVRvIjoiMHgyMDk2OTNCYzZhZmMwQzUzMjhiQTM2RmFGMDNDNTE0RUYzMTIyODdDIiwibWF4VGltZW91dFNlY29uZHMiOjYwLCJleHRyYSI6eyJuYW1lIjoiVVNEIENvaW4iLCJ2ZXJzaW9uIjoiMiJ9fV19",
+      "json": {
+        "accepts": [
+          {
+            "amount": "10000",
+            "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+            "extra": {
+              "name": "USDC",
+              "version": "2"
+            },
+            "maxTimeoutSeconds": 60,
+            "network": "eip155:84532",
+            "payTo": "0x209693Bc6afc0C5328bA36FaF03C514EF312287C",
+            "scheme": "exact"
+          },
+          {
+            "amount": "10000",
+            "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+            "extra": {
+              "name": "USD Coin",
+              "version": "2"
+            },
+            "maxTimeoutSeconds": 60,
+            "network": "eip155:8453",
+            "payTo": "0x209693Bc6afc0C5328bA36FaF03C514EF312287C",
+            "scheme": "exact"
+          }
+        ],
+        "error": "PAYMENT-SIGNATURE header is required",
+        "resource": {
+          "description": "Access to premium market data",
+          "mimeType": "application/json",
+          "url": "https://api.example.com/premium-data"
+        },
+        "x402Version": 2
+      },
+      "kind": "payment_required",
+      "name": "payment-required"
+    },
+    {
+      "header": "eyJ4NDAyVmVyc2lvbiI6MiwicmVzb3VyY2UiOnsidXJsIjoiaHR0cHM6Ly9hcGkuZXhhbXBsZS5jb20vcHJlbWl1bS1kYXRhIn0sImFjY2VwdGVkIjp7InNjaGVtZSI6ImV4YWN0IiwibmV0d29yayI6ImVpcDE1NTo4NDUzMiIsImFtb3VudCI6IjEwMDAwIiwiYXNzZXQiOiIweDAzNkNiRDUzODQyYzU0MjY2MzRlNzkyOTU0MWVDMjMxOGYzZENGN2UiLCJwYXlUbyI6IjB4MjA5NjkzQmM2YWZjMEM1MzI4YkEzNkZhRjAzQzUxNEVGMzEyMjg3QyIsIm1heFRpbWVvdXRTZWNvbmRzIjo2MCwiZXh0cmEiOnsibmFtZSI6IlVTREMiLCJ2ZXJzaW9uIjoiMiJ9fSwicGF5bG9hZCI6eyJhdXRob3JpemF0aW9uIjp7ImZyb20iOiIweDE5RTdFMzc2RTdDMjEzQjdFN2U3ZTQ2Y2M3MEE1ZEQwODZEQWZmMkEiLCJub25jZSI6IjB4NDI0MjQyNDI0MjQyNDI0MjQyNDI0MjQyNDI0MjQyNDI0MjQyNDI0MjQyNDI0MjQyNDI0MjQyNDI0MjQyNDI0MiIsInRvIjoiMHgyMDk2OTNCYzZhZmMwQzUzMjhiQTM2RmFGMDNDNTE0RUYzMTIyODdDIiwidmFsaWRBZnRlciI6IjE3OTk5OTk0MDAiLCJ2YWxpZEJlZm9yZSI6IjE4MDAwMDAwNjAiLCJ2YWx1ZSI6IjEwMDAwIn0sInNpZ25hdHVyZSI6IjB4ODMxOTA2ZTk4NTQ5ODdlYmQ2ZWJjZDMwODA2OWM3MjgwODRlODlmMzI2YmViYTE5ZjBkYTcxMzc5MDJlNThjMjE2NGY4YzhiZTU2ZDc1MThmY2EzMmE4NTgzNGVlYmY1NzVkOGZiOWViZGQ4ZDc0ZTk3ZjVhNzM0MTM3MGU3ODAxYyJ9fQ==",
+      "json": {
+        "accepted": {
+          "amount": "10000",
+          "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+          "extra": {
+            "name": "USDC",
+            "version": "2"
+          },
+          "maxTimeoutSeconds": 60,
+          "network": "eip155:84532",
+          "payTo": "0x209693Bc6afc0C5328bA36FaF03C514EF312287C",
+          "scheme": "exact"
+        },
+        "payload": {
+          "authorization": {
+            "from": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A",
+            "nonce": "0x4242424242424242424242424242424242424242424242424242424242424242",
+            "to": "0x209693Bc6afc0C5328bA36FaF03C514EF312287C",
+            "validAfter": "1799999400",
+            "validBefore": "1800000060",
+            "value": "10000"
+          },
+          "signature": "0x831906e9854987ebd6ebcd308069c728084e89f326beba19f0da7137902e58c2164f8c8be56d7518fca32a85834eebf575d8fb9ebdd8d74e97f5a7341370e7801c"
+        },
+        "resource": {
+          "url": "https://api.example.com/premium-data"
+        },
+        "x402Version": 2
+      },
+      "kind": "payment_payload",
+      "name": "payment-payload-base-sepolia"
+    },
+    {
+      "header": "eyJzdWNjZXNzIjp0cnVlLCJwYXllciI6IjB4MTlFN0UzNzZFN0MyMTNCN0U3ZTdlNDZjYzcwQTVkRDA4NkRBZmYyQSIsInRyYW5zYWN0aW9uIjoiMHhhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiIiwibmV0d29yayI6ImVpcDE1NTo4NDUzMiIsImFtb3VudCI6IjEwMDAwIn0=",
+      "json": {
+        "amount": "10000",
+        "network": "eip155:84532",
+        "payer": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A",
+        "success": true,
+        "transaction": "0xabababababababababababababababababababababababababababababababab"
+      },
+      "kind": "settle_response",
+      "name": "settle-success"
+    },
+    {
+      "header": "eyJzdWNjZXNzIjpmYWxzZSwiZXJyb3JSZWFzb24iOiJpbnN1ZmZpY2llbnRfZnVuZHMiLCJwYXllciI6IjB4MTlFN0UzNzZFN0MyMTNCN0U3ZTdlNDZjYzcwQTVkRDA4NkRBZmYyQSIsInRyYW5zYWN0aW9uIjoiIiwibmV0d29yayI6ImVpcDE1NTo4NDUzMiJ9",
+      "json": {
+        "errorReason": "insufficient_funds",
+        "network": "eip155:84532",
+        "payer": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A",
+        "success": false,
+        "transaction": ""
+      },
+      "kind": "settle_response",
+      "name": "settle-failure"
+    },
+    {
+      "json": {
+        "paymentPayload": {
+          "accepted": {
+            "amount": "10000",
+            "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+            "extra": {
+              "name": "USDC",
+              "version": "2"
+            },
+            "maxTimeoutSeconds": 60,
+            "network": "eip155:84532",
+            "payTo": "0x209693Bc6afc0C5328bA36FaF03C514EF312287C",
+            "scheme": "exact"
+          },
+          "payload": {
+            "authorization": {
+              "from": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A",
+              "nonce": "0x4242424242424242424242424242424242424242424242424242424242424242",
+              "to": "0x209693Bc6afc0C5328bA36FaF03C514EF312287C",
+              "validAfter": "1799999400",
+              "validBefore": "1800000060",
+              "value": "10000"
+            },
+            "signature": "0x831906e9854987ebd6ebcd308069c728084e89f326beba19f0da7137902e58c2164f8c8be56d7518fca32a85834eebf575d8fb9ebdd8d74e97f5a7341370e7801c"
+          },
+          "resource": {
+            "url": "https://api.example.com/premium-data"
+          },
+          "x402Version": 2
+        },
+        "paymentRequirements": {
+          "amount": "10000",
+          "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+          "extra": {
+            "name": "USDC",
+            "version": "2"
+          },
+          "maxTimeoutSeconds": 60,
+          "network": "eip155:84532",
+          "payTo": "0x209693Bc6afc0C5328bA36FaF03C514EF312287C",
+          "scheme": "exact"
+        },
+        "x402Version": 2
+      },
+      "kind": "facilitator_request",
+      "name": "facilitator-request"
+    }
+  ]
+}
