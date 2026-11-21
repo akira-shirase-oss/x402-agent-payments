@@ -53,6 +53,7 @@ mutations=(
   "settle-names-the-payer|crates/xpay-seller/src/layer.rs|is_some_and=>is_none_or|xpay-seller|seller|a_settle_answer_that_names_no_payer_is_held_and_never_served"
   "resumable-on-server-error|crates/xpay-wallet/src/lib.rs|!status\.is_server_error\(\)=>true|xpay-wallet|wallet|a_504_settle_timeout_keeps_the_proof_and_a_second_get_signs_nothing_new"
   "one-payment-per-url|crates/xpay-wallet/src/lib.rs|u\.url == url &&=>false &&|xpay-wallet|wallet|a_409_the_seller_will_not_serve_stops_resends_and_signs_nothing_new"
+  "url-without-fragment|crates/xpay-wallet/src/lib.rs|set_fragment\(None\)=>set_fragment(url.clone().fragment())|xpay-wallet|wallet|a_fragment_is_not_another_url_and_signs_nothing_new"
   "payment-in-flight|crates/xpay-seller/src/layer.rs|config\.max_in_flight\)=>Semaphore::MAX_PERMITS)|xpay-seller|lifecycle|hang_ups_cannot_grow_facilitator_work_past_the_in_flight_bound"
   "payment-per-client|crates/xpay-seller/src/layer.rs|>= this\.per \{=>>= usize::MAX {|xpay-seller|lifecycle|one_client_cannot_take_every_payment_slot"
   "payment-per-network|crates/xpay-seller/src/layer.rs|>= this\.per_network=>>= usize::MAX|xpay-seller|lifecycle|one_network_cannot_take_every_payment_slot"

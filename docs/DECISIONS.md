@@ -150,7 +150,9 @@ reconciles against events. Seller reason text reaches the caller only as a plain
 or 5xx carries the same proof, so one 402 is paid at most once. `validAfter` is
 `now − 600 s` (USDC refuses `validAfter ≥ block.timestamp`; `docs/KNOWLEDGE.md`),
 `validBefore` is `now + maxTimeoutSeconds`, and `maxTimeoutSeconds` is capped by policy.
-The cap is per process in M1; M2 moves it into the ledger's transaction.
+The cap is per process in M1 and in memory only: a restart, or a second `Wallet` on the
+same key, starts `total_cap` again at zero and forgets every `Unresolved` proof (N15 in
+`docs/ROADMAP.md`); M2 moves it into the ledger's transaction.
 
 ## D-013 — Signatures: 65-byte EOA, low-s, v in {27, 28}
 
@@ -247,11 +249,22 @@ against a 64-claim store, with thresholds written before the first run.
 ## D-020 — One live proof per URL; a task that dies after settlement answers handler_timeout
 
 - **Wallet.** While a proof for a URL may still settle (until its `validBefore` plus
-  `EXPIRY_MARGIN_SECS`), `get` of that URL never signs another: it resends that proof
-  when it is resumable, else refuses with `WalletError::PaymentPending { nonce }` (resolve
-  it with `reconcile`). The check runs under the same lock as the push, so two racing
-  gets sign one proof. A 5xx (any 504 included) is not a decision: the proof stays
-  resumable.
+  `EXPIRY_MARGIN_SECS`, by the local clock), `get` of that URL never signs another: it
+  resends that proof while it is resumable and `now < validBefore`, else refuses with
+  `WalletError::PaymentPending { nonce }`. The check runs under the same lock as the
+  push, so two racing gets sign one proof. A 5xx (any 504 included) is not a decision:
+  the proof stays resumable.
+- **What the guarantee covers.** It holds per process (one `Wallet` value, state in
+  memory) and only within that window. After the window `get` signs a new proof without
+  reading the chain and without waiting for `reconcile` (which is not a gate, and has no
+  `AuthorizationState` source in M1): after any outcome the seller holds, a later `get`
+  pays again and is served while the seller still holds the first, bounded by
+  `total_cap`; `committed()` counts both (N17). A restart or a second `Wallet` on the same
+  key signs at once (N15).
+- **The same URL.** The parsed URL without its fragment (a fragment is never sent, so it
+  is stripped before the URL is keyed). The query is part of the key, its order too:
+  `/paid?a=1&b=2`, `/paid?b=2&a=1` and `/paid` are three URLs, each paid on its own, while
+  the seller binds a claim by method and path only (N16).
 - **Seller.** When a paid request's task dies after `Phase::Settled` (a handler panic),
   the claim guard records it not delivered and only then answers `504 handler_timeout`, so
   the resend of the same proof is served. A retry that finds another retry serving the

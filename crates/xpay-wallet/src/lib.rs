@@ -16,8 +16,10 @@
 //! While the seller is still working on a payment (`409 payment_in_flight`, `503`, a
 //! `504 handler_timeout`, or no answer) the wallet backs off and resends the same proof
 //! until `validBefore`. A `5xx` or `504` the wallet does not wait out leaves the proof
-//! resumable (the payment may still settle), and while any proof for a URL may still
-//! settle, [`Wallet::get`] of that URL never signs another ([`WalletError::PaymentPending`]).
+//! resumable (the payment may still settle). Until a proof's `validBefore` plus
+//! [`EXPIRY_MARGIN_SECS`] by the local clock, [`Wallet::get`] of that URL signs no other
+//! ([`WalletError::PaymentPending`]); after that it signs a new one without reading the
+//! chain. This holds within one [`Wallet`] value only: its state is in memory.
 
 use std::future::Future;
 use std::net::IpAddr;
@@ -219,8 +221,11 @@ pub enum WalletError {
     #[error("no unresolved payment with that nonce, or it can no longer be served")]
     NotResumable,
     /// A proof already sent for this URL may still settle and the seller will not serve it
-    /// again: nothing new is signed until [`Wallet::reconcile`] decides it.
-    #[error("a payment for this URL may still settle; reconcile it first")]
+    /// again. [`Wallet::get`] of this URL signs nothing new until that proof's
+    /// `validBefore` plus [`EXPIRY_MARGIN_SECS`] has passed by the local clock; it then
+    /// signs a new proof without reading the chain, so both may be paid (bounded by the
+    /// total cap; [`Wallet::committed`] counts both). [`Wallet::reconcile`] is not a gate.
+    #[error("a payment for this URL may still settle until its validBefore plus the expiry margin")]
     PaymentPending { nonce: B256 },
 }
 
@@ -488,9 +493,13 @@ impl Wallet {
 
     /// GET `url`, paying its 402 if policy allows. A live proof already sent for `url`
     /// is resent instead of paying again; one that may still settle but will not be
-    /// served refuses with [`WalletError::PaymentPending`].
+    /// served refuses with [`WalletError::PaymentPending`]. The same URL means the same
+    /// parsed URL without its fragment (never sent): a different query, or the same query
+    /// in another order, is another URL.
     pub async fn get(&self, url: &str) -> Result<Receipt, WalletError> {
-        let url = reqwest::Url::parse(url).map_err(|_| WalletError::Url)?;
+        let mut url = reqwest::Url::parse(url).map_err(|_| WalletError::Url)?;
+        // LIMIT(url-without-fragment)
+        url.set_fragment(None);
         let origin = self.allowed(&url)?;
         if let Some(u) = self.pending_for(url.as_str())? {
             return self.deliver(&url, &u, true).await;

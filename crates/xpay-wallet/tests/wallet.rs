@@ -469,6 +469,29 @@ async fn a_409_the_seller_will_not_serve_stops_resends_and_signs_nothing_new() {
 }
 
 #[tokio::test]
+async fn a_fragment_is_not_another_url_and_signs_nothing_new() {
+    let s = seller(SELLER, vec![Then::Answer(409, "payment_not_delivered"); 4]).await;
+    let w = wallet(vec![format!("127.0.0.1:{}", s.port)]);
+    let url = format!("http://127.0.0.1:{}/paid", s.port);
+    let first = w.get(&url).await;
+    assert!(
+        matches!(first, Err(WalletError::Unsettled(Some(409)))),
+        "{first:?}"
+    );
+    let nonce = w.unresolved()[0].nonce;
+    let second = w.get(&format!("{url}#again")).await;
+    assert!(
+        matches!(second, Err(WalletError::PaymentPending { nonce: n }) if n == nonce),
+        "{second:?}"
+    );
+    assert_eq!(s.proofs.load(Ordering::SeqCst), 1);
+    assert_eq!(w.committed(), U256::from(PRICE));
+    let left = w.unresolved();
+    assert_eq!(left.len(), 1);
+    assert_eq!(left[0].url, url);
+}
+
+#[tokio::test]
 async fn two_racing_gets_of_one_url_sign_one_proof() {
     let s = seller(SELLER, vec![Then::Hangup; 16]).await;
     let w = wallet(vec![format!("127.0.0.1:{}", s.port)]);
